@@ -1,0 +1,6 @@
+{
+  "name": "Multiplayer Racing Game",
+  "description": "A high-octane 3D multiplayer racing game with real-time sync, drift-scoring mechanics, customized lobby system, live results, and persistent leaderboards.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
