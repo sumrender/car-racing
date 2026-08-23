@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState, FormEvent } from "react";
-import { Trophy, Users, Send, ArrowRight, Play, CheckCircle, RotateCcw, Sparkles, MessageCircle, Sun, Moon, User, Zap, ChevronLeft, Flag, Compass, Settings } from "lucide-react";
+import { Trophy, Users, Send, ArrowRight, Play, CheckCircle, RotateCcw, Sparkles, MessageCircle, Sun, Moon, User, Zap, ChevronLeft, Flag, Compass, Settings, Bot, Cpu, Award } from "lucide-react";
 import { Player, Room, WSMessage, BestTime } from "./types";
 import RaceCanvas from "./components/RaceCanvas.tsx";
 import Speedometer from "./components/Speedometer.tsx";
 import Minimap from "./components/Minimap.tsx";
 import SettingsModal from "./components/SettingsModal.tsx";
+import { AIDifficulty, AI_DIFFICULTIES, StandingsResult } from "./utils/aiOpponent";
 
 export function formatTime(ms: number): string {
   if (!ms || isNaN(ms)) return "00:00.00";
@@ -75,6 +76,41 @@ export default function App() {
     place: 1,
   });
 
+  // AI Opponent State for Single Player Mode
+  const [aiDifficulty, setAiDifficulty] = useState<AIDifficulty>("medium");
+  const [aiOpponent, setAiOpponent] = useState<Player>({
+    id: "ai_opponent",
+    name: "Apex AI",
+    color: "#ef4444",
+    isHost: false,
+    ready: true,
+    x: 3.5,
+    y: 0,
+    z: -2.0,
+    rotationY: 0,
+    speed: 0,
+    driftScore: 0,
+    isDrifting: false,
+    driftMeter: 0,
+    totalDriftScore: 0,
+    checkpoint: 0,
+    lap: 1,
+    finished: false,
+    finishTime: 0,
+    place: 2,
+  });
+
+  const [aiStandings, setAiStandings] = useState<StandingsResult>({
+    playerPlace: 1,
+    aiPlace: 2,
+    gapMeters: 0,
+    leadPlayerName: "Solo Driver",
+    isLapping: false,
+    lapsDifference: 0,
+    playerProgress: 0,
+    aiProgress: 0,
+  });
+
   // ==================== MULTIPLAYER STATE ====================
   const [roomInput, setRoomInput] = useState("");
   const [isJoined, setIsJoined] = useState(false);
@@ -131,6 +167,40 @@ export default function App() {
       place: 1,
     });
 
+    const aiCfg = AI_DIFFICULTIES[aiDifficulty] || AI_DIFFICULTIES.medium;
+    setAiOpponent({
+      id: "ai_opponent",
+      name: aiCfg.label + " AI",
+      color: aiCfg.color,
+      isHost: false,
+      ready: true,
+      x: 3.5,
+      y: 0,
+      z: -2.0,
+      rotationY: 0,
+      speed: 0,
+      driftScore: 0,
+      isDrifting: false,
+      driftMeter: 0,
+      totalDriftScore: 0,
+      checkpoint: 0,
+      lap: 1,
+      finished: false,
+      finishTime: 0,
+      place: 2,
+    });
+
+    setAiStandings({
+      playerPlace: 1,
+      aiPlace: 2,
+      gapMeters: 0,
+      leadPlayerName: userName.trim() || "Solo Driver",
+      isLapping: false,
+      lapsDifference: 0,
+      playerProgress: 0,
+      aiProgress: 0,
+    });
+
     setSingleStatus("countdown");
     setSingleCountdown(3);
     setSingleRaceTimeMs(0);
@@ -178,6 +248,20 @@ export default function App() {
       }
 
       return updated;
+    });
+  }
+
+  function handleAIOpponentUpdate(
+    aiPlayer: Player,
+    standings: StandingsResult
+  ) {
+    setAiOpponent(aiPlayer);
+    setAiStandings(standings);
+    setSinglePlayer((prev) => {
+      if (prev.place !== standings.playerPlace) {
+        return { ...prev, place: standings.playerPlace };
+      }
+      return prev;
     });
   }
 
@@ -575,7 +659,7 @@ export default function App() {
       {/* 2. SINGLE PLAYER MODE: CUSTOMIZATION SETUP SCREEN                        */}
       {/* ========================================================================= */}
       {gameMode === "single" && singleStatus === "setup" && (
-        <div className="flex-1 w-full max-w-md mx-auto flex flex-col items-center justify-center px-4 py-8 overflow-y-auto z-10">
+        <div className="flex-1 w-full max-w-2xl mx-auto flex flex-col items-center justify-center px-4 py-8 overflow-y-auto z-10">
           <div className={`w-full p-6 sm:p-8 rounded-2xl border transition-colors duration-300 relative ${
             theme === "dark" 
               ? "bg-slate-900 border-slate-800 shadow-2xl" 
@@ -598,14 +682,14 @@ export default function App() {
               }`}>
                 Single Player Setup
               </h1>
-              <p className={`text-xs mt-1 max-w-xs ${
+              <p className={`text-xs mt-1 max-w-md ${
                 theme === "dark" ? "text-slate-400" : "text-slate-500"
               }`}>
-                Customize your racer and hit the track immediately.
+                Customize your racer and tune your AI rival for the ultimate solo challenge.
               </p>
             </div>
 
-            <div className="space-y-4">
+            <div className="space-y-5">
               {/* Nickname input */}
               <div className="flex flex-col gap-1 text-left">
                 <label className={`text-[10px] font-mono font-bold tracking-wider uppercase ${
@@ -634,14 +718,14 @@ export default function App() {
                 }`}>
                   2. Choose Vehicle Paint:
                 </label>
-                <div className="grid grid-cols-6 gap-2 pt-1">
+                <div className="grid grid-cols-6 gap-2.5 pt-1">
                   {CAR_COLOR_PRESETS.map((color) => {
                     const isSelected = userColor.toLowerCase() === color.hex.toLowerCase();
                     return (
                       <button
                         key={color.hex}
                         onClick={() => setUserColor(color.hex)}
-                        className={`h-9 rounded-xl border-2 transition-transform duration-75 relative flex items-center justify-center ${
+                        className={`h-10 rounded-xl border-2 transition-transform duration-75 relative flex items-center justify-center ${
                           isSelected
                             ? "border-indigo-500 scale-105 shadow-md"
                             : "border-transparent hover:scale-105"
@@ -656,6 +740,130 @@ export default function App() {
                     );
                   })}
                 </div>
+              </div>
+
+              {/* AI Opponent Difficulty Selector */}
+              <div className="flex flex-col gap-2 text-left">
+                <div className="flex items-center justify-between">
+                  <label className={`text-[10px] font-mono font-bold tracking-wider uppercase flex items-center gap-1.5 ${
+                    theme === "dark" ? "text-slate-400" : "text-slate-500"
+                  }`}>
+                    <Bot className="w-3.5 h-3.5 text-indigo-500" /> 3. Select AI Opponent Difficulty:
+                  </label>
+                  <span
+                    className="text-[9px] font-mono font-black uppercase px-2 py-0.5 rounded tracking-wider"
+                    style={{
+                      backgroundColor: `${AI_DIFFICULTIES[aiDifficulty].color}20`,
+                      color: AI_DIFFICULTIES[aiDifficulty].color,
+                      border: `1px solid ${AI_DIFFICULTIES[aiDifficulty].color}40`,
+                    }}
+                  >
+                    {AI_DIFFICULTIES[aiDifficulty].badge}
+                  </span>
+                </div>
+                
+                {/* 5-Tier Segmented Selector Tabs */}
+                <div className="grid grid-cols-5 gap-1.5 p-1 rounded-xl bg-slate-950/40 dark:bg-slate-950/80 border border-slate-200 dark:border-slate-800/80">
+                  {(Object.keys(AI_DIFFICULTIES) as AIDifficulty[]).map((key) => {
+                    const diff = AI_DIFFICULTIES[key];
+                    const isSelected = aiDifficulty === key;
+                    return (
+                      <button
+                        key={key}
+                        onClick={() => setAiDifficulty(key)}
+                        type="button"
+                        className={`py-2 px-1 rounded-lg text-center font-mono transition-all flex flex-col items-center justify-center gap-0.5 relative ${
+                          isSelected
+                            ? "bg-slate-800 text-white shadow-sm ring-1 ring-white/20"
+                            : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/40"
+                        }`}
+                        style={isSelected ? { borderBottom: `2px solid ${diff.color}` } : {}}
+                      >
+                        <div className="flex items-center gap-1">
+                          <span
+                            className="w-2 h-2 rounded-full inline-block shrink-0"
+                            style={{ backgroundColor: diff.color }}
+                          />
+                          <span className="text-[11px] font-bold tracking-tight whitespace-nowrap">
+                            {diff.label}
+                          </span>
+                        </div>
+                        <span className="text-[8px] font-mono text-slate-400 uppercase tracking-widest">
+                          {diff.badge}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* Selected AI Rival Telemetry Dossier Card */}
+                {(() => {
+                  const currentDiff = AI_DIFFICULTIES[aiDifficulty];
+                  return (
+                    <div
+                      className={`p-4 rounded-xl border transition-all ${
+                        theme === "dark"
+                          ? "bg-slate-950/80 border-slate-800"
+                          : "bg-slate-50/90 border-slate-200"
+                      }`}
+                      style={{ borderLeft: `4px solid ${currentDiff.color}` }}
+                    >
+                      <div className="flex items-start justify-between gap-2 mb-2">
+                        <div className="flex items-center gap-2">
+                          <span
+                            className="w-3 h-3 rounded-full shrink-0 shadow-sm animate-pulse"
+                            style={{ backgroundColor: currentDiff.color }}
+                          />
+                          <span className={`text-sm font-mono font-black ${
+                            theme === "dark" ? "text-white" : "text-slate-900"
+                          }`}>
+                            {currentDiff.label}
+                          </span>
+                          <span
+                            className="text-[9px] font-mono font-bold px-1.5 py-0.5 rounded uppercase tracking-wider"
+                            style={{
+                              backgroundColor: `${currentDiff.color}20`,
+                              color: currentDiff.color,
+                              border: `1px solid ${currentDiff.color}40`,
+                            }}
+                          >
+                            {currentDiff.badge} TIER
+                          </span>
+                        </div>
+
+                        <div className="flex items-center gap-2 text-[10px] font-mono font-bold">
+                          <span className="text-slate-400">
+                            Base: <strong className="text-slate-200">{currentDiff.baseSpeed} km/h</strong>
+                          </span>
+                          <span className="text-amber-500 dark:text-amber-400">
+                            Boost: <strong>{currentDiff.boostSpeed} km/h</strong>
+                          </span>
+                        </div>
+                      </div>
+
+                      <p className={`text-xs leading-relaxed ${
+                        theme === "dark" ? "text-slate-300" : "text-slate-600"
+                      }`}>
+                        {currentDiff.description}
+                      </p>
+
+                      <div className="grid grid-cols-3 gap-2 mt-3 pt-2.5 border-t border-slate-800/50 text-[10px] font-mono text-slate-400">
+                        <div className="flex flex-col">
+                          <span className="text-[8px] uppercase tracking-wider text-slate-500">Cornering Pace</span>
+                          <span className="font-bold text-slate-200">{currentDiff.cornerSpeed} km/h</span>
+                        </div>
+                        <div className="flex flex-col">
+                          <span className="text-[8px] uppercase tracking-wider text-slate-500">Nitro Overdrive</span>
+                          <span className="font-bold text-indigo-400">{Math.round(currentDiff.nitroFrequency * 100)}% Aggression</span>
+                        </div>
+                        <div className="flex flex-col">
+                          <span className="text-[8px] uppercase tracking-wider text-slate-500">Drift Rating</span>
+                          <span className="font-bold text-emerald-400">{Math.round(currentDiff.driftAggression * 100)}% Power Slide</span>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })()}
               </div>
 
               {/* Solo Best Time stats if exists */}
@@ -677,7 +885,7 @@ export default function App() {
                 onClick={startSinglePlayerRace}
                 className="w-full py-3.5 bg-indigo-600 hover:bg-indigo-700 text-white font-mono text-xs font-bold rounded-xl transition-all active:scale-[0.98] flex items-center justify-center gap-2 shadow-md mt-2"
               >
-                <Play className="w-4 h-4 fill-white" /> START DRIVING NOW
+                <Play className="w-4 h-4 fill-white" /> START RACE VS AI
               </button>
             </div>
           </div>
@@ -697,13 +905,18 @@ export default function App() {
               activeRoomStatus={singleStatus}
               onUpdateState={handleSinglePlayerUpdate}
               theme={theme}
+              isSinglePlayer={true}
+              aiDifficulty={aiDifficulty}
+              aiName={aiOpponent.name}
+              aiColor={aiOpponent.color}
+              onAIOpponentUpdate={handleAIOpponentUpdate}
             />
 
             {/* COUNTDOWN OVERLAY TRIGGER */}
             {singleStatus === "countdown" && (
               <div className="absolute inset-0 bg-black/60 flex flex-col items-center justify-center z-40 backdrop-blur-sm select-none">
-                <div className="text-[11px] font-mono font-bold text-indigo-400 tracking-widest uppercase mb-1 animate-pulse">
-                  Single Player Race Starting
+                <div className="text-[11px] font-mono font-bold text-indigo-400 tracking-widest uppercase mb-1 flex items-center gap-2 animate-pulse">
+                  <Bot className="w-4 h-4" /> Racing VS Computer Rival: {aiOpponent.name}
                 </div>
                 <div className="text-8xl font-black font-sans text-transparent bg-clip-text bg-gradient-to-b from-indigo-300 via-pink-400 to-pink-600 tracking-tighter scale-125 select-none transition animate-pulse">
                   {singleCountdown > 0 ? singleCountdown : "GO!"}
@@ -745,11 +958,41 @@ export default function App() {
                     </div>
                   </div>
 
-                  {/* High Precision Timer */}
-                  <div className="bg-slate-950/80 border border-slate-800/60 h-11 px-4 rounded-xl backdrop-blur flex items-center justify-center font-mono">
-                    <div className="text-slate-500 text-[10px] uppercase font-bold tracking-wider mr-2">TIME:</div>
-                    <div className="text-base font-extrabold text-slate-200 tracking-tight select-all pointer-events-auto">
-                      {formatTime(singleRaceTimeMs)}
+                  {/* High Precision Timer & Live Standings Position */}
+                  <div className="flex flex-col items-center gap-1.5">
+                    <div className="bg-slate-950/85 border border-slate-800/70 h-11 px-4 rounded-xl backdrop-blur flex items-center justify-center font-mono shadow-lg">
+                      <div className="text-slate-500 text-[10px] uppercase font-bold tracking-wider mr-2">TIME:</div>
+                      <div className="text-base font-extrabold text-slate-200 tracking-tight select-all pointer-events-auto">
+                        {formatTime(singleRaceTimeMs)}
+                      </div>
+                    </div>
+
+                    {/* Standings Position Badge & Distance Split */}
+                    <div className="flex items-center gap-2 bg-slate-950/90 border border-slate-800 px-3 py-1 rounded-full backdrop-blur shadow-md">
+                      <span className={`text-[10px] font-mono font-black px-2 py-0.5 rounded-full flex items-center gap-1 ${
+                        aiStandings.playerPlace === 1
+                          ? "bg-amber-500 text-slate-950"
+                          : "bg-slate-700 text-slate-200"
+                      }`}>
+                        <Trophy className="w-3 h-3" />
+                        P{aiStandings.playerPlace}
+                      </span>
+
+                      <span className={`text-[10px] font-mono font-bold ${
+                        aiStandings.playerPlace === 1
+                          ? "text-emerald-400"
+                          : "text-rose-400"
+                      }`}>
+                        {aiStandings.playerPlace === 1 ? (
+                          aiStandings.gapMeters >= 1000
+                            ? `+${(aiStandings.gapMeters / 1000).toFixed(1)}KM LEAD${aiStandings.isLapping ? " (LAPPING)" : ""}`
+                            : `+${aiStandings.gapMeters}M LEAD`
+                        ) : (
+                          aiStandings.gapMeters >= 1000
+                            ? `-${(aiStandings.gapMeters / 1000).toFixed(1)}KM BEHIND`
+                            : `-${aiStandings.gapMeters}M BEHIND`
+                        )}
+                      </span>
                     </div>
                   </div>
 
@@ -799,14 +1042,29 @@ export default function App() {
                   {/* Left Bottom corner: Dynamic GPS Minimap */}
                   <div className="flex flex-col gap-2 pointer-events-auto items-start">
                     <Minimap
-                      players={[singlePlayer]}
+                      players={[singlePlayer, aiOpponent]}
                       myPlayerId={singlePlayer.id}
                       theme={theme}
                     />
 
-                    <div className="bg-slate-950/80 border border-slate-800/60 px-3 py-1.5 rounded-xl backdrop-blur text-left">
-                      <div className="text-[8px] font-mono font-bold text-slate-500 uppercase tracking-widest">
-                        SOLO PRACTICE MODE
+                    <div className="bg-slate-950/90 border border-slate-800/80 px-3 py-2 rounded-xl backdrop-blur text-left flex flex-col gap-0.5 shadow-lg">
+                      <div className="text-[8px] font-mono font-bold text-slate-500 uppercase tracking-widest flex items-center gap-1">
+                        <Bot className="w-3 h-3 text-indigo-400" /> AI RIVAL TELEMETRY
+                      </div>
+                      <div className="text-[10px] font-mono flex items-center gap-2">
+                        <span className="font-bold flex items-center gap-1 text-slate-200">
+                          <span
+                            className="w-2 h-2 rounded-full"
+                            style={{ backgroundColor: aiOpponent.color }}
+                          />
+                          {aiOpponent.name}
+                        </span>
+                        <span className="text-slate-400 font-medium">
+                          LAP {Math.min(aiOpponent.lap, 3)}/3
+                        </span>
+                        <span className="text-indigo-400 font-bold">
+                          {Math.round(aiOpponent.speed)} KM/H
+                        </span>
                       </div>
                     </div>
                   </div>
@@ -828,49 +1086,122 @@ export default function App() {
 
             {/* RESULTS SCREEN FOR SINGLE PLAYER */}
             {singleStatus === "results" && (
-              <div className="absolute inset-x-4 top-12 bottom-12 bg-slate-950/95 border border-indigo-500 max-w-md mx-auto rounded-2xl shadow-2xl backdrop-blur-lg z-40 flex flex-col justify-between p-6 select-text pointer-events-auto animate-scaleIn">
+              <div className="absolute inset-x-4 top-10 bottom-10 max-w-lg mx-auto bg-slate-950/95 border border-indigo-500/80 rounded-2xl shadow-2xl backdrop-blur-xl z-40 flex flex-col justify-between p-6 select-text pointer-events-auto animate-scaleIn overflow-y-auto">
                 <div className="text-center">
-                  <div className="text-4xl mb-2">🏆</div>
-                  <div className="text-[11px] font-mono font-bold text-indigo-400 tracking-widest uppercase mb-1">
-                    COURSE COMPLETED
+                  <div className="text-5xl mb-2">
+                    {singlePlayer.place === 1 ? "🏆" : "🥈"}
                   </div>
-                  <h2 className="text-2xl font-black font-sans text-white tracking-tight uppercase">
-                    RACE FINISHED!
+                  <div className="text-[11px] font-mono font-bold text-indigo-400 tracking-widest uppercase mb-1">
+                    RACE COMPLETED
+                  </div>
+                  <h2 className="text-3xl font-black font-sans text-white tracking-tight uppercase">
+                    {singlePlayer.place === 1 ? "VICTORY!" : "2ND PLACE FINISH"}
                   </h2>
-                  <p className="text-xs text-slate-400 mt-1">
-                    Great driving, {singlePlayer.name}! Here is your single player summary.
+                  <p className="text-xs text-slate-400 mt-1 max-w-sm mx-auto">
+                    {singlePlayer.place === 1
+                      ? `Incredible racing! You beat ${aiOpponent.name} on ${AI_DIFFICULTIES[aiDifficulty].label} difficulty!`
+                      : `Good run! ${aiOpponent.name} edged ahead. Jump back in for a rematch!`}
                   </p>
 
-                  <div className="mt-6 space-y-2.5 font-mono text-xs text-left">
-                    <div className="flex justify-between p-3 bg-slate-900 border border-slate-800 rounded-xl">
-                      <span className="text-slate-500 uppercase">FINAL TIME</span>
-                      <span className="text-indigo-300 font-bold">{formatTime(singlePlayer.finishTime || singleRaceTimeMs)}</span>
+                  {/* Leaderboard Podium Cards */}
+                  <div className="mt-5 space-y-2.5 font-mono text-xs text-left">
+                    <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider px-1">
+                      Race Standings & Podium
                     </div>
 
-                    <div className="flex justify-between p-3 bg-slate-900 border border-slate-800 rounded-xl">
-                      <span className="text-slate-500 uppercase">TOTAL DRIFT SCORE</span>
-                      <span className="text-yellow-400 font-bold">{singlePlayer.totalDriftScore.toLocaleString()} PTS</span>
+                    {/* 1st Place Card */}
+                    <div className="p-3.5 bg-slate-900/90 border-2 border-amber-500/80 rounded-xl flex items-center justify-between shadow-md">
+                      <div className="flex items-center gap-3">
+                        <span className="text-lg font-black text-amber-400 font-mono w-6">#1</span>
+                        <div
+                          className="w-3.5 h-3.5 rounded-full shrink-0 shadow-sm"
+                          style={{
+                            backgroundColor:
+                              singlePlayer.place === 1 ? singlePlayer.color : aiOpponent.color,
+                          }}
+                        />
+                        <div>
+                          <div className="font-bold text-white flex items-center gap-1.5">
+                            {singlePlayer.place === 1 ? singlePlayer.name : aiOpponent.name}
+                            <span className="text-[9px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 font-semibold border border-amber-500/30">
+                              WINNER
+                            </span>
+                          </div>
+                          <div className="text-[10px] text-slate-400">
+                            {singlePlayer.place === 1
+                              ? `${singlePlayer.totalDriftScore.toLocaleString()} Drift Pts`
+                              : "Computer Opponent"}
+                          </div>
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <div className="font-bold text-amber-300">
+                          {formatTime(
+                            singlePlayer.place === 1
+                              ? singlePlayer.finishTime || singleRaceTimeMs
+                              : aiOpponent.finishTime || singleRaceTimeMs - 800
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* 2nd Place Card */}
+                    <div className="p-3.5 bg-slate-900/60 border border-slate-800 rounded-xl flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <span className="text-lg font-black text-slate-500 font-mono w-6">#2</span>
+                        <div
+                          className="w-3.5 h-3.5 rounded-full shrink-0 shadow-sm"
+                          style={{
+                            backgroundColor:
+                              singlePlayer.place === 2 ? singlePlayer.color : aiOpponent.color,
+                          }}
+                        />
+                        <div>
+                          <div className="font-bold text-slate-300 flex items-center gap-1.5">
+                            {singlePlayer.place === 2 ? singlePlayer.name : aiOpponent.name}
+                            <span className="text-[9px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 font-semibold border border-slate-700">
+                              RUNNER-UP
+                            </span>
+                          </div>
+                          <div className="text-[10px] text-slate-500">
+                            {singlePlayer.place === 2
+                              ? `${singlePlayer.totalDriftScore.toLocaleString()} Drift Pts`
+                              : "Computer Opponent"}
+                          </div>
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <div className="font-bold text-slate-400">
+                          {formatTime(
+                            singlePlayer.place === 2
+                              ? singlePlayer.finishTime || singleRaceTimeMs
+                              : (singlePlayer.finishTime || singleRaceTimeMs) + 1200
+                          )}
+                        </div>
+                      </div>
                     </div>
 
                     {singleBestTime && (
-                      <div className="flex justify-between p-3 bg-indigo-950/30 border border-indigo-500/30 rounded-xl">
-                        <span className="text-indigo-300 uppercase">ALL-TIME BEST</span>
+                      <div className="flex justify-between p-3 bg-indigo-950/30 border border-indigo-500/30 rounded-xl mt-3">
+                        <span className="text-indigo-300 uppercase flex items-center gap-1.5">
+                          <Trophy className="w-3.5 h-3.5 text-yellow-500" /> ALL-TIME SOLO BEST
+                        </span>
                         <span className="text-green-400 font-bold">{formatTime(singleBestTime)}</span>
                       </div>
                     )}
                   </div>
                 </div>
 
-                <div className="mt-6 flex gap-3 pt-4 border-t border-slate-900">
+                <div className="mt-5 flex gap-3 pt-4 border-t border-slate-900">
                   <button
                     onClick={handleSinglePlayerRestart}
-                    className="flex-1 py-3 bg-indigo-600 hover:bg-indigo-700 font-mono text-xs font-bold text-white rounded-xl transition shadow flex items-center justify-center gap-1.5"
+                    className="flex-1 py-3.5 bg-indigo-600 hover:bg-indigo-700 font-mono text-xs font-bold text-white rounded-xl transition shadow flex items-center justify-center gap-1.5"
                   >
-                    <RotateCcw className="w-4 h-4" /> DRIVE AGAIN
+                    <RotateCcw className="w-4 h-4" /> RACE AGAIN
                   </button>
                   <button
                     onClick={handleExitToMainMenu}
-                    className="px-5 py-3 border border-slate-800 hover:bg-slate-900 font-mono text-xs text-slate-300 rounded-xl transition"
+                    className="px-5 py-3.5 border border-slate-800 hover:bg-slate-900 font-mono text-xs text-slate-300 rounded-xl transition"
                   >
                     MAIN MENU
                   </button>

@@ -2,6 +2,14 @@ import { useEffect, useRef, useState } from "react";
 import * as THREE from "three";
 import { Player } from "../types";
 import { startNitroAudio, stopNitroAudio } from "../utils/audio";
+import {
+  AIDifficulty,
+  AIState,
+  createInitialAIState,
+  updateAISimulation,
+  calculateRaceStandings,
+  StandingsResult,
+} from "../utils/aiOpponent";
 
 // Definitions of track spline points on the XZ plane (Y = 0)
 // Scaled for a fun speedrun length
@@ -57,6 +65,14 @@ interface RaceCanvasProps {
   activeRoomStatus: "lobby" | "countdown" | "racing" | "results";
   onUpdateState: (state: Partial<Player>) => void;
   theme: "light" | "dark";
+  isSinglePlayer?: boolean;
+  aiDifficulty?: AIDifficulty;
+  aiName?: string;
+  aiColor?: string;
+  onAIOpponentUpdate?: (
+    ai: Player,
+    standings: StandingsResult
+  ) => void;
 }
 
 export default function RaceCanvas({
@@ -65,6 +81,11 @@ export default function RaceCanvas({
   activeRoomStatus,
   onUpdateState,
   theme,
+  isSinglePlayer = false,
+  aiDifficulty = "medium",
+  aiName = "Apex AI",
+  aiColor = "#ef4444",
+  onAIOpponentUpdate,
 }: RaceCanvasProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -76,6 +97,12 @@ export default function RaceCanvas({
   const remotePlayersRef = useRef<Player[]>(remotePlayers);
   const activeRoomStatusRef = useRef<string>(activeRoomStatus);
   const onUpdateStateRef = useRef(onUpdateState);
+  const onAIOpponentUpdateRef = useRef(onAIOpponentUpdate);
+
+  // AI Opponent simulation state ref
+  const aiStateRef = useRef<AIState>(
+    createInitialAIState(aiDifficulty, aiName, aiColor)
+  );
 
   useEffect(() => {
     localPlayerRef.current = localPlayer;
@@ -87,11 +114,18 @@ export default function RaceCanvas({
 
   useEffect(() => {
     activeRoomStatusRef.current = activeRoomStatus;
-  }, [activeRoomStatus]);
+    if (activeRoomStatus === "countdown" || activeRoomStatus === "lobby") {
+      aiStateRef.current = createInitialAIState(aiDifficulty, aiName, aiColor);
+    }
+  }, [activeRoomStatus, aiDifficulty, aiName, aiColor]);
 
   useEffect(() => {
     onUpdateStateRef.current = onUpdateState;
   }, [onUpdateState]);
+
+  useEffect(() => {
+    onAIOpponentUpdateRef.current = onAIOpponentUpdate;
+  }, [onAIOpponentUpdate]);
 
   // Input states ref
   const keysRef = useRef<{ w: boolean; s: boolean; a: boolean; d: boolean; space: boolean; r: boolean }>({
@@ -875,6 +909,15 @@ export default function RaceCanvas({
     };
     window.addEventListener("resize", handleResize);
 
+    const trackLength = TRACK_CURVE.getLength();
+
+    // Spawn dedicated AI Car if in Single Player mode
+    let aiCarMesh: THREE.Group | null = null;
+    if (isSinglePlayer) {
+      aiCarMesh = createCarMesh(aiColor || "#ef4444", "ai_opponent");
+      scene.add(aiCarMesh);
+    }
+
     // LOGIC TICK VARIABLES
     let lastTime = performance.now();
     let networkSendTimer = 0;
@@ -928,6 +971,65 @@ export default function RaceCanvas({
         if (!remotePlayersRef.current.some((rp) => rp.id === rid)) {
           scene.remove(rCar.group);
           remoteCarsMap.delete(rid);
+        }
+      }
+
+      // 1B. UPDATE AI OPPONENT DRIVING SIMULATION (Single Player)
+      if (isSinglePlayer && aiCarMesh) {
+        const roadCheckPlayer = checkOnRoad(new THREE.Vector3(pState.x, pState.y, pState.z));
+        const playerContinuousProg = pState.finished ? 3.0 : (Math.max(0, pState.lap - 1) + roadCheckPlayer.u);
+
+        aiStateRef.current = updateAISimulation(
+          aiStateRef.current,
+          dt,
+          TRACK_CURVE,
+          trackLength,
+          activeRoomStatusRef.current as any,
+          (window as any).raceStartTime || Date.now(),
+          playerContinuousProg,
+          pState.speed
+        );
+
+        const aiP = aiStateRef.current.player;
+        aiCarMesh.position.set(aiP.x, aiP.y, aiP.z);
+        aiCarMesh.rotation.y = aiP.rotationY;
+
+        // Roll AI wheels
+        const aiRollScalar = aiP.speed * dt * 0.8;
+        const aiRL = aiCarMesh.getObjectByName("rearLeft_roll") as THREE.Group;
+        const aiRR = aiCarMesh.getObjectByName("rearRight_roll") as THREE.Group;
+        const aiFL = aiCarMesh.getObjectByName("frontLeft_roll") as THREE.Group;
+        const aiFR = aiCarMesh.getObjectByName("frontRight_roll") as THREE.Group;
+        if (aiRL) aiRL.rotation.x += aiRollScalar;
+        if (aiRR) aiRR.rotation.x += aiRollScalar;
+        if (aiFL) aiFL.rotation.x += aiRollScalar;
+        if (aiFR) aiFR.rotation.x += aiRollScalar;
+
+        // AI Brake light reactivity
+        const aiBrakeL = aiCarMesh.getObjectByName("brakeLightL") as THREE.Mesh;
+        const aiBrakeR = aiCarMesh.getObjectByName("brakeLightR") as THREE.Mesh;
+        if (aiBrakeL && aiBrakeR) {
+          if (aiStateRef.current.currentSpeed < 35 && activeRoomStatusRef.current === "racing") {
+            (aiBrakeL.material as THREE.MeshBasicMaterial).color.set("#ef4444");
+            (aiBrakeR.material as THREE.MeshBasicMaterial).color.set("#ef4444");
+          } else {
+            (aiBrakeL.material as THREE.MeshBasicMaterial).color.set("#7f1d1d");
+            (aiBrakeR.material as THREE.MeshBasicMaterial).color.set("#7f1d1d");
+          }
+        }
+
+        // AI Nitro plume visibility
+        const aiNitro = aiCarMesh.getObjectByName("nitroPlumes") as THREE.Group;
+        if (aiNitro) {
+          aiNitro.visible = aiStateRef.current.boostTimer > 0;
+        }
+
+        // AI Drift smoke particles
+        if (aiP.isDrifting && Math.random() < 0.3) {
+          const rotCos = Math.sin(aiP.rotationY);
+          const rotSin = Math.cos(aiP.rotationY);
+          const exhaustPos = new THREE.Vector3(aiP.x - rotCos * 2.5, 0.4, aiP.z - rotSin * 2.5);
+          spawnDust(exhaustPos, new THREE.Vector3(-rotCos * 3, 1.0, -rotSin * 3), aiP.color);
         }
       }
 
@@ -1286,9 +1388,9 @@ export default function RaceCanvas({
 
       renderer.render(scene, camera);
 
-      // THROTTLED NET TRANSMISSION (30Hz)
+      // THROTTLED NET & TELEMETRY TRANSMISSION (15Hz) - perfectly smooth for HUD gauges without React render churn
       networkSendTimer += dt;
-      if (networkSendTimer >= 0.035 && activeRoomStatusRef.current === "racing") {
+      if (networkSendTimer >= 0.065 && activeRoomStatusRef.current === "racing") {
         networkSendTimer = 0;
         onUpdateStateRef.current({
           x: pState.x,
@@ -1303,6 +1405,24 @@ export default function RaceCanvas({
           lap: Math.min(pState.lap, 3),
           checkpoint: pState.checkpoint,
         });
+
+        if (isSinglePlayer && onAIOpponentUpdateRef.current) {
+          const roadCheck = checkOnRoad(new THREE.Vector3(pState.x, pState.y, pState.z));
+          const standings = calculateRaceStandings(
+            {
+              name: localPlayerRef.current.name || "Solo Driver",
+              lap: pState.lap,
+              checkpoint: pState.checkpoint,
+              finished: pState.finished,
+              finishTime: pState.finished ? (Date.now() - ((window as any).raceStartTime || Date.now())) : undefined,
+            },
+            aiStateRef.current.player,
+            roadCheck.u,
+            aiStateRef.current.u,
+            trackLength
+          );
+          onAIOpponentUpdateRef.current(aiStateRef.current.player, standings);
+        }
       }
 
       requestAnimationFrame(gameLoop);
@@ -1313,6 +1433,7 @@ export default function RaceCanvas({
     return () => {
       cancelAnimationFrame(animId);
       window.removeEventListener("resize", handleResize);
+      if (aiCarMesh) scene.remove(aiCarMesh);
       renderer.dispose();
       roadGeo.dispose();
       roadMat.dispose();
