@@ -5,7 +5,7 @@ import RaceCanvas from "./components/RaceCanvas.tsx";
 import Speedometer from "./components/Speedometer.tsx";
 import Minimap from "./components/Minimap.tsx";
 import SettingsModal from "./components/SettingsModal.tsx";
-import { AIDifficulty, AI_DIFFICULTIES, StandingsResult } from "./utils/aiOpponent";
+import { AIDifficulty, AI_DIFFICULTIES, StandingsResult, AI_RIVAL_PRESETS, createAIPackState, RacerStanding } from "./utils/aiOpponent";
 
 export function formatTime(ms: number): string {
   if (!ms || isNaN(ms)) return "00:00.00";
@@ -76,10 +76,23 @@ export default function App() {
     place: 1,
   });
 
-  // AI Opponent State for Single Player Mode
+  // AI Opponent State for Single Player Mode (Supports 1 to 5 rivals)
   const [aiDifficulty, setAiDifficulty] = useState<AIDifficulty>("medium");
+  const [aiOpponentsCount, setAiOpponentsCount] = useState<number>(() => {
+    const saved = localStorage.getItem("racer_ai_count");
+    if (saved) {
+      const num = parseInt(saved, 10);
+      if (!isNaN(num) && num >= 1 && num <= 5) return num;
+    }
+    return 3;
+  });
+
+  const [aiOpponents, setAiOpponents] = useState<Player[]>(() => {
+    return createAIPackState(3, "medium").map((s) => s.player);
+  });
+
   const [aiOpponent, setAiOpponent] = useState<Player>({
-    id: "ai_opponent",
+    id: "ai_opponent_0",
     name: "Apex AI",
     color: "#ef4444",
     isHost: false,
@@ -103,12 +116,14 @@ export default function App() {
   const [aiStandings, setAiStandings] = useState<StandingsResult>({
     playerPlace: 1,
     aiPlace: 2,
+    totalRacers: 4,
     gapMeters: 0,
     leadPlayerName: "Solo Driver",
     isLapping: false,
     lapsDifference: 0,
     playerProgress: 0,
     aiProgress: 0,
+    allStandings: [],
   });
 
   // ==================== MULTIPLAYER STATE ====================
@@ -142,6 +157,7 @@ export default function App() {
   function startSinglePlayerRace() {
     localStorage.setItem("racer_name", userName.trim() || "Solo Driver");
     localStorage.setItem("racer_color", userColor);
+    localStorage.setItem("racer_ai_count", aiOpponentsCount.toString());
 
     if (singleTimerRef.current) clearInterval(singleTimerRef.current);
 
@@ -167,11 +183,12 @@ export default function App() {
       place: 1,
     });
 
-    const aiCfg = AI_DIFFICULTIES[aiDifficulty] || AI_DIFFICULTIES.medium;
-    setAiOpponent({
-      id: "ai_opponent",
-      name: aiCfg.label + " AI",
-      color: aiCfg.color,
+    const initialPack = createAIPackState(aiOpponentsCount, aiDifficulty);
+    setAiOpponents(initialPack.map((s) => s.player));
+    setAiOpponent(initialPack[0]?.player || {
+      id: "ai_opponent_0",
+      name: "Apex AI",
+      color: "#ef4444",
       isHost: false,
       ready: true,
       x: 3.5,
@@ -193,12 +210,14 @@ export default function App() {
     setAiStandings({
       playerPlace: 1,
       aiPlace: 2,
+      totalRacers: aiOpponentsCount + 1,
       gapMeters: 0,
       leadPlayerName: userName.trim() || "Solo Driver",
       isLapping: false,
       lapsDifference: 0,
       playerProgress: 0,
       aiProgress: 0,
+      allStandings: [],
     });
 
     setSingleStatus("countdown");
@@ -248,6 +267,21 @@ export default function App() {
       }
 
       return updated;
+    });
+  }
+
+  function handleAIPackUpdate(
+    pack: Player[],
+    standings: StandingsResult
+  ) {
+    setAiOpponents(pack);
+    if (pack[0]) setAiOpponent(pack[0]);
+    setAiStandings(standings);
+    setSinglePlayer((prev) => {
+      if (prev.place !== standings.playerPlace) {
+        return { ...prev, place: standings.playerPlace };
+      }
+      return prev;
     });
   }
 
@@ -742,13 +776,81 @@ export default function App() {
                 </div>
               </div>
 
-              {/* AI Opponent Difficulty Selector */}
+              {/* Step 3: AI Opponents Count (Grid Size: 1 to 5 Rivals) */}
               <div className="flex flex-col gap-2 text-left">
                 <div className="flex items-center justify-between">
                   <label className={`text-[10px] font-mono font-bold tracking-wider uppercase flex items-center gap-1.5 ${
                     theme === "dark" ? "text-slate-400" : "text-slate-500"
                   }`}>
-                    <Bot className="w-3.5 h-3.5 text-indigo-500" /> 3. Select AI Opponent Difficulty:
+                    <Users className="w-3.5 h-3.5 text-indigo-500" /> 3. Configure AI Opponents (Grid Size):
+                  </label>
+                  <span className="text-[10px] font-mono font-bold text-indigo-400">
+                    {aiOpponentsCount} {aiOpponentsCount === 1 ? "Rival" : "Rivals"} ({aiOpponentsCount + 1} Cars Total)
+                  </span>
+                </div>
+
+                {/* 5-Option Grid Size Selector */}
+                <div className="grid grid-cols-5 gap-1.5 p-1 rounded-xl bg-slate-950/40 dark:bg-slate-950/80 border border-slate-200 dark:border-slate-800/80">
+                  {[1, 2, 3, 4, 5].map((count) => {
+                    const isSelected = aiOpponentsCount === count;
+                    const labels = ["1 Rival", "2 Rivals", "3 Rivals", "4 Rivals", "5 Rivals"];
+                    const sublabels = ["Duel", "3-Way", "Squad", "5 Cars", "Full Grid"];
+                    return (
+                      <button
+                        key={count}
+                        type="button"
+                        onClick={() => {
+                          setAiOpponentsCount(count);
+                          localStorage.setItem("racer_ai_count", count.toString());
+                        }}
+                        className={`py-2 px-1 rounded-lg text-center font-mono transition-all flex flex-col items-center justify-center gap-0.5 relative ${
+                          isSelected
+                            ? "bg-indigo-600 text-white shadow-sm ring-1 ring-white/20"
+                            : "text-slate-400 hover:text-slate-200 hover:bg-slate-800/40"
+                        }`}
+                      >
+                        <span className="text-xs font-black tracking-tight">{labels[count - 1]}</span>
+                        <span className={`text-[8px] uppercase tracking-wider ${isSelected ? "text-indigo-200" : "text-slate-500"}`}>
+                          {sublabels[count - 1]}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* Active AI Rivals Starting Grid Preview Roster */}
+                <div className={`p-2.5 rounded-xl border flex flex-wrap gap-1.5 items-center ${
+                  theme === "dark" ? "bg-slate-950/60 border-slate-800/80" : "bg-slate-50 border-slate-200"
+                }`}>
+                  <span className="text-[9px] font-mono text-slate-500 uppercase tracking-widest font-bold w-full mb-0.5">
+                    Starting Grid Lineup ({aiOpponentsCount + 1} Racers):
+                  </span>
+                  {/* Player Chip */}
+                  <div className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-indigo-950/80 border border-indigo-500/50 text-[10px] font-mono font-bold text-white shadow-sm">
+                    <span className="w-2 h-2 rounded-full" style={{ backgroundColor: userColor }} />
+                    <span>P1: {userName.trim() || "You"} (Player)</span>
+                  </div>
+                  {/* AI Opponents Chips */}
+                  {AI_RIVAL_PRESETS.slice(0, aiOpponentsCount).map((rival, idx) => (
+                    <div
+                      key={rival.name}
+                      className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-slate-900/80 border border-slate-800 text-[10px] font-mono text-slate-300"
+                    >
+                      <span className="w-2 h-2 rounded-full" style={{ backgroundColor: rival.color }} />
+                      <span className="font-medium text-slate-200">P{idx + 2}: {rival.name}</span>
+                      <span className="text-[8px] text-slate-500">({rival.title})</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Step 4: AI Opponent Difficulty Selector */}
+              <div className="flex flex-col gap-2 text-left">
+                <div className="flex items-center justify-between">
+                  <label className={`text-[10px] font-mono font-bold tracking-wider uppercase flex items-center gap-1.5 ${
+                    theme === "dark" ? "text-slate-400" : "text-slate-500"
+                  }`}>
+                    <Bot className="w-3.5 h-3.5 text-indigo-500" /> 4. Select AI Opponents Difficulty:
                   </label>
                   <span
                     className="text-[9px] font-mono font-black uppercase px-2 py-0.5 rounded tracking-wider"
@@ -817,7 +919,7 @@ export default function App() {
                           <span className={`text-sm font-mono font-black ${
                             theme === "dark" ? "text-white" : "text-slate-900"
                           }`}>
-                            {currentDiff.label}
+                            {currentDiff.label} Tier AI Pack
                           </span>
                           <span
                             className="text-[9px] font-mono font-bold px-1.5 py-0.5 rounded uppercase tracking-wider"
@@ -827,7 +929,7 @@ export default function App() {
                               border: `1px solid ${currentDiff.color}40`,
                             }}
                           >
-                            {currentDiff.badge} TIER
+                            {currentDiff.badge}
                           </span>
                         </div>
 
@@ -907,16 +1009,18 @@ export default function App() {
               theme={theme}
               isSinglePlayer={true}
               aiDifficulty={aiDifficulty}
+              aiCount={aiOpponentsCount}
               aiName={aiOpponent.name}
               aiColor={aiOpponent.color}
               onAIOpponentUpdate={handleAIOpponentUpdate}
+              onAIPackUpdate={handleAIPackUpdate}
             />
 
             {/* COUNTDOWN OVERLAY TRIGGER */}
             {singleStatus === "countdown" && (
               <div className="absolute inset-0 bg-black/60 flex flex-col items-center justify-center z-40 backdrop-blur-sm select-none">
                 <div className="text-[11px] font-mono font-bold text-indigo-400 tracking-widest uppercase mb-1 flex items-center gap-2 animate-pulse">
-                  <Bot className="w-4 h-4" /> Racing VS Computer Rival: {aiOpponent.name}
+                  <Bot className="w-4 h-4" /> Racing VS {aiOpponentsCount} AI {aiOpponentsCount === 1 ? "Rival" : "Rivals"} ({AI_DIFFICULTIES[aiDifficulty].label})
                 </div>
                 <div className="text-8xl font-black font-sans text-transparent bg-clip-text bg-gradient-to-b from-indigo-300 via-pink-400 to-pink-600 tracking-tighter scale-125 select-none transition animate-pulse">
                   {singleCountdown > 0 ? singleCountdown : "GO!"}
@@ -975,7 +1079,7 @@ export default function App() {
                           : "bg-slate-700 text-slate-200"
                       }`}>
                         <Trophy className="w-3 h-3" />
-                        P{aiStandings.playerPlace}
+                        P{aiStandings.playerPlace} / {aiStandings.totalRacers || (aiOpponentsCount + 1)}
                       </span>
 
                       <span className={`text-[10px] font-mono font-bold ${
@@ -985,12 +1089,12 @@ export default function App() {
                       }`}>
                         {aiStandings.playerPlace === 1 ? (
                           aiStandings.gapMeters >= 1000
-                            ? `+${(aiStandings.gapMeters / 1000).toFixed(1)}KM LEAD${aiStandings.isLapping ? " (LAPPING)" : ""}`
+                            ? `+${(aiStandings.gapMeters / 1000).toFixed(1)}KM LEAD`
                             : `+${aiStandings.gapMeters}M LEAD`
                         ) : (
                           aiStandings.gapMeters >= 1000
-                            ? `-${(aiStandings.gapMeters / 1000).toFixed(1)}KM BEHIND`
-                            : `-${aiStandings.gapMeters}M BEHIND`
+                            ? `-${(aiStandings.gapMeters / 1000).toFixed(1)}KM GAP`
+                            : `-${aiStandings.gapMeters}M GAP`
                         )}
                       </span>
                     </div>
@@ -1039,32 +1143,42 @@ export default function App() {
 
                 {/* HUD Bottom Panel: GPS Minimap and Speedometer */}
                 <div className="flex justify-between items-end">
-                  {/* Left Bottom corner: Dynamic GPS Minimap */}
-                  <div className="flex flex-col gap-2 pointer-events-auto items-start">
+                  {/* Left Bottom corner: Dynamic GPS Minimap & AI Pack Telemetry */}
+                  <div className="flex flex-col gap-2 pointer-events-auto items-start max-w-xs">
                     <Minimap
-                      players={[singlePlayer, aiOpponent]}
+                      players={[singlePlayer, ...aiOpponents]}
                       myPlayerId={singlePlayer.id}
                       theme={theme}
                     />
 
-                    <div className="bg-slate-950/90 border border-slate-800/80 px-3 py-2 rounded-xl backdrop-blur text-left flex flex-col gap-0.5 shadow-lg">
-                      <div className="text-[8px] font-mono font-bold text-slate-500 uppercase tracking-widest flex items-center gap-1">
-                        <Bot className="w-3 h-3 text-indigo-400" /> AI RIVAL TELEMETRY
+                    {/* AI Opponents Pack Live Telemetry Stack */}
+                    <div className="bg-slate-950/90 border border-slate-800/80 p-2.5 rounded-xl backdrop-blur text-left flex flex-col gap-1.5 shadow-lg w-full">
+                      <div className="text-[8px] font-mono font-bold text-slate-500 uppercase tracking-widest flex items-center justify-between">
+                        <span className="flex items-center gap-1">
+                          <Bot className="w-3 h-3 text-indigo-400" /> AI PACK TELEMETRY ({aiOpponents.length})
+                        </span>
+                        <span className="text-indigo-400">{AI_DIFFICULTIES[aiDifficulty].label}</span>
                       </div>
-                      <div className="text-[10px] font-mono flex items-center gap-2">
-                        <span className="font-bold flex items-center gap-1 text-slate-200">
-                          <span
-                            className="w-2 h-2 rounded-full"
-                            style={{ backgroundColor: aiOpponent.color }}
-                          />
-                          {aiOpponent.name}
-                        </span>
-                        <span className="text-slate-400 font-medium">
-                          LAP {Math.min(aiOpponent.lap, 3)}/3
-                        </span>
-                        <span className="text-indigo-400 font-bold">
-                          {Math.round(aiOpponent.speed)} KM/H
-                        </span>
+                      <div className="flex flex-col gap-1 max-h-24 overflow-y-auto pr-1">
+                        {aiOpponents.map((rival, index) => (
+                          <div key={rival.id || index} className="text-[9px] font-mono flex items-center justify-between gap-1 text-slate-300">
+                            <span className="font-bold flex items-center gap-1 truncate max-w-[110px]">
+                              <span
+                                className="w-2 h-2 rounded-full shrink-0"
+                                style={{ backgroundColor: rival.color }}
+                              />
+                              {rival.name}
+                            </span>
+                            <div className="flex items-center gap-2 shrink-0">
+                              <span className="text-slate-400 font-medium">
+                                L{Math.min(rival.lap, 3)}/3
+                              </span>
+                              <span className="text-indigo-400 font-bold w-12 text-right">
+                                {Math.round(rival.speed)} KM/H
+                              </span>
+                            </div>
+                          </div>
+                        ))}
                       </div>
                     </div>
                   </div>
@@ -1086,100 +1200,125 @@ export default function App() {
 
             {/* RESULTS SCREEN FOR SINGLE PLAYER */}
             {singleStatus === "results" && (
-              <div className="absolute inset-x-4 top-10 bottom-10 max-w-lg mx-auto bg-slate-950/95 border border-indigo-500/80 rounded-2xl shadow-2xl backdrop-blur-xl z-40 flex flex-col justify-between p-6 select-text pointer-events-auto animate-scaleIn overflow-y-auto">
+              <div className="absolute inset-x-4 top-8 bottom-8 max-w-lg mx-auto bg-slate-950/95 border border-indigo-500/80 rounded-2xl shadow-2xl backdrop-blur-xl z-40 flex flex-col justify-between p-6 select-text pointer-events-auto animate-scaleIn overflow-y-auto">
                 <div className="text-center">
                   <div className="text-5xl mb-2">
-                    {singlePlayer.place === 1 ? "🏆" : "🥈"}
+                    {singlePlayer.place === 1 ? "🏆" : singlePlayer.place === 2 ? "🥈" : singlePlayer.place === 3 ? "🥉" : "🏁"}
                   </div>
                   <div className="text-[11px] font-mono font-bold text-indigo-400 tracking-widest uppercase mb-1">
-                    RACE COMPLETED
+                    RACE COMPLETED • {aiOpponentsCount + 1} RACERS
                   </div>
                   <h2 className="text-3xl font-black font-sans text-white tracking-tight uppercase">
-                    {singlePlayer.place === 1 ? "VICTORY!" : "2ND PLACE FINISH"}
+                    {singlePlayer.place === 1
+                      ? "VICTORY!"
+                      : singlePlayer.place === 2
+                      ? "2ND PLACE PODIUM"
+                      : singlePlayer.place === 3
+                      ? "3RD PLACE PODIUM"
+                      : `P${singlePlayer.place} FINISH`}
                   </h2>
                   <p className="text-xs text-slate-400 mt-1 max-w-sm mx-auto">
                     {singlePlayer.place === 1
-                      ? `Incredible racing! You beat ${aiOpponent.name} on ${AI_DIFFICULTIES[aiDifficulty].label} difficulty!`
-                      : `Good run! ${aiOpponent.name} edged ahead. Jump back in for a rematch!`}
+                      ? `Incredible driving! You dominated all ${aiOpponentsCount} AI rivals on ${AI_DIFFICULTIES[aiDifficulty].label} tier!`
+                      : `Great run against the ${aiOpponentsCount} AI pack on ${AI_DIFFICULTIES[aiDifficulty].label} tier. Jump back in for a rematch!`}
                   </p>
 
-                  {/* Leaderboard Podium Cards */}
-                  <div className="mt-5 space-y-2.5 font-mono text-xs text-left">
+                  {/* Complete Leaderboard Podium Standings for all Racers */}
+                  <div className="mt-4 space-y-2 font-mono text-xs text-left">
                     <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider px-1">
-                      Race Standings & Podium
+                      Final Race Standings & Grid Results
                     </div>
 
-                    {/* 1st Place Card */}
-                    <div className="p-3.5 bg-slate-900/90 border-2 border-amber-500/80 rounded-xl flex items-center justify-between shadow-md">
-                      <div className="flex items-center gap-3">
-                        <span className="text-lg font-black text-amber-400 font-mono w-6">#1</span>
-                        <div
-                          className="w-3.5 h-3.5 rounded-full shrink-0 shadow-sm"
-                          style={{
-                            backgroundColor:
-                              singlePlayer.place === 1 ? singlePlayer.color : aiOpponent.color,
-                          }}
-                        />
-                        <div>
-                          <div className="font-bold text-white flex items-center gap-1.5">
-                            {singlePlayer.place === 1 ? singlePlayer.name : aiOpponent.name}
-                            <span className="text-[9px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 font-semibold border border-amber-500/30">
-                              WINNER
-                            </span>
-                          </div>
-                          <div className="text-[10px] text-slate-400">
-                            {singlePlayer.place === 1
-                              ? `${singlePlayer.totalDriftScore.toLocaleString()} Drift Pts`
-                              : "Computer Opponent"}
-                          </div>
-                        </div>
-                      </div>
-                      <div className="text-right">
-                        <div className="font-bold text-amber-300">
-                          {formatTime(
-                            singlePlayer.place === 1
-                              ? singlePlayer.finishTime || singleRaceTimeMs
-                              : aiOpponent.finishTime || singleRaceTimeMs - 800
-                          )}
-                        </div>
-                      </div>
-                    </div>
+                    {(() => {
+                      // Generate sorted standings list
+                      const allDrivers: Array<{
+                        id: string;
+                        name: string;
+                        color: string;
+                        isPlayer: boolean;
+                        place: number;
+                        finishTime?: number;
+                        driftScore: number;
+                      }> = [
+                        {
+                          id: singlePlayer.id,
+                          name: singlePlayer.name || "Solo Driver",
+                          color: singlePlayer.color,
+                          isPlayer: true,
+                          place: singlePlayer.place || 1,
+                          finishTime: singlePlayer.finishTime || singleRaceTimeMs,
+                          driftScore: singlePlayer.totalDriftScore,
+                        },
+                        ...aiOpponents.map((ai, index) => ({
+                          id: ai.id,
+                          name: ai.name,
+                          color: ai.color,
+                          isPlayer: false,
+                          place: ai.place || (index + 2),
+                          finishTime: ai.finishTime || (singleRaceTimeMs + (index + 1) * 1200),
+                          driftScore: ai.totalDriftScore || 0,
+                        })),
+                      ];
 
-                    {/* 2nd Place Card */}
-                    <div className="p-3.5 bg-slate-900/60 border border-slate-800 rounded-xl flex items-center justify-between">
-                      <div className="flex items-center gap-3">
-                        <span className="text-lg font-black text-slate-500 font-mono w-6">#2</span>
-                        <div
-                          className="w-3.5 h-3.5 rounded-full shrink-0 shadow-sm"
-                          style={{
-                            backgroundColor:
-                              singlePlayer.place === 2 ? singlePlayer.color : aiOpponent.color,
-                          }}
-                        />
-                        <div>
-                          <div className="font-bold text-slate-300 flex items-center gap-1.5">
-                            {singlePlayer.place === 2 ? singlePlayer.name : aiOpponent.name}
-                            <span className="text-[9px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 font-semibold border border-slate-700">
-                              RUNNER-UP
-                            </span>
+                      // Sort by place
+                      allDrivers.sort((a, b) => a.place - b.place);
+
+                      return allDrivers.map((driver, rankIdx) => {
+                        const rank = rankIdx + 1;
+                        const isWinner = rank === 1;
+                        const isPlayer = driver.isPlayer;
+
+                        return (
+                          <div
+                            key={driver.id || rankIdx}
+                            className={`p-3 rounded-xl flex items-center justify-between transition-all ${
+                              isPlayer
+                                ? "bg-indigo-950/70 border-2 border-indigo-500 shadow-md"
+                                : isWinner
+                                ? "bg-slate-900/90 border border-amber-500/60"
+                                : "bg-slate-900/50 border border-slate-800/80"
+                            }`}
+                          >
+                            <div className="flex items-center gap-3">
+                              <span className={`text-base font-black font-mono w-6 ${
+                                rank === 1 ? "text-amber-400" : rank === 2 ? "text-slate-300" : rank === 3 ? "text-amber-600" : "text-slate-500"
+                              }`}>
+                                #{rank}
+                              </span>
+                              <div
+                                className="w-3.5 h-3.5 rounded-full shrink-0 shadow-sm"
+                                style={{ backgroundColor: driver.color }}
+                              />
+                              <div>
+                                <div className="font-bold text-white flex items-center gap-1.5">
+                                  {driver.name}
+                                  {isPlayer && (
+                                    <span className="text-[9px] px-1.5 py-0.2 rounded bg-indigo-500/30 text-indigo-300 font-semibold border border-indigo-500/40">
+                                      YOU
+                                    </span>
+                                  )}
+                                  {isWinner && (
+                                    <span className="text-[9px] px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-300 font-semibold border border-amber-500/30">
+                                      WINNER
+                                    </span>
+                                  )}
+                                </div>
+                                <div className="text-[10px] text-slate-400">
+                                  {isPlayer
+                                    ? `${driver.driftScore.toLocaleString()} Drift Pts`
+                                    : "Computer Rival"}
+                                </div>
+                              </div>
+                            </div>
+                            <div className="text-right">
+                              <div className={`font-bold ${isWinner ? "text-amber-300" : "text-slate-300"}`}>
+                                {formatTime(driver.finishTime || singleRaceTimeMs)}
+                              </div>
+                            </div>
                           </div>
-                          <div className="text-[10px] text-slate-500">
-                            {singlePlayer.place === 2
-                              ? `${singlePlayer.totalDriftScore.toLocaleString()} Drift Pts`
-                              : "Computer Opponent"}
-                          </div>
-                        </div>
-                      </div>
-                      <div className="text-right">
-                        <div className="font-bold text-slate-400">
-                          {formatTime(
-                            singlePlayer.place === 2
-                              ? singlePlayer.finishTime || singleRaceTimeMs
-                              : (singlePlayer.finishTime || singleRaceTimeMs) + 1200
-                          )}
-                        </div>
-                      </div>
-                    </div>
+                        );
+                      });
+                    })()}
 
                     {singleBestTime && (
                       <div className="flex justify-between p-3 bg-indigo-950/30 border border-indigo-500/30 rounded-xl mt-3">
@@ -1192,7 +1331,7 @@ export default function App() {
                   </div>
                 </div>
 
-                <div className="mt-5 flex gap-3 pt-4 border-t border-slate-900">
+                <div className="mt-4 flex gap-3 pt-3 border-t border-slate-900">
                   <button
                     onClick={handleSinglePlayerRestart}
                     className="flex-1 py-3.5 bg-indigo-600 hover:bg-indigo-700 font-mono text-xs font-bold text-white rounded-xl transition shadow flex items-center justify-center gap-1.5"
