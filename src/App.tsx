@@ -1,9 +1,18 @@
 import { useEffect, useRef, useState, FormEvent } from "react";
-import { Maximize2, Trophy, Users, Send, ArrowRight, Play, CheckCircle, RotateCcw, Volume2, Sparkles, MessageCircle, Sun, Moon } from "lucide-react";
+import { Trophy, Users, Send, ArrowRight, Play, CheckCircle, RotateCcw, Sparkles, MessageCircle, Sun, Moon, User, Zap, ChevronLeft, Flag, Compass, Settings } from "lucide-react";
 import { Player, Room, WSMessage, BestTime } from "./types";
 import RaceCanvas from "./components/RaceCanvas.tsx";
 import Speedometer from "./components/Speedometer.tsx";
-import Leaderboard, { formatTime } from "./components/Leaderboard.tsx";
+import Minimap from "./components/Minimap.tsx";
+import SettingsModal from "./components/SettingsModal.tsx";
+
+export function formatTime(ms: number): string {
+  if (!ms || isNaN(ms)) return "00:00.00";
+  const minutes = Math.floor(ms / 60000);
+  const seconds = Math.floor((ms % 60000) / 1000);
+  const centiseconds = Math.floor((ms % 1000) / 10);
+  return `${minutes.toString().padStart(2, "0")}:${seconds.toString().padStart(2, "0")}.${centiseconds.toString().padStart(2, "0")}`;
+}
 
 const CAR_COLOR_PRESETS = [
   { name: "Speed Crimson", hex: "#ef4444" },
@@ -15,9 +24,9 @@ const CAR_COLOR_PRESETS = [
 ];
 
 export default function App() {
-  // Theme state settings
+  // Theme state settings (Default is light mode)
   const [theme, setTheme] = useState<"light" | "dark">(
-    () => (localStorage.getItem("racer_theme") as "light" | "dark") || "dark"
+    () => (localStorage.getItem("racer_theme") as "light" | "dark") || "light"
   );
 
   function toggleTheme() {
@@ -26,44 +35,185 @@ export default function App() {
     localStorage.setItem("racer_theme", nextTheme);
   }
 
-  // Username and connection settings states
-  const [userName, setUserName] = useState(() => localStorage.getItem("racer_name") || "");
+  // Game Mode: null (first screen asks mode), "single", or "multi"
+  const [gameMode, setGameMode] = useState<null | "single" | "multi">(null);
+
+  // Username and vehicle settings
+  const [userName, setUserName] = useState(() => localStorage.getItem("racer_name") || "Racer 1");
   const [userColor, setUserColor] = useState(() => localStorage.getItem("racer_color") || "#ef4444");
+
+  // ==================== SINGLE PLAYER STATE ====================
+  const [singleStatus, setSingleStatus] = useState<"setup" | "countdown" | "racing" | "results">("setup");
+  const [singleCountdown, setSingleCountdown] = useState(3);
+  const [singleRaceTimeMs, setSingleRaceTimeMs] = useState(0);
+  const [singleBestTime, setSingleBestTime] = useState<number | null>(() => {
+    const saved = localStorage.getItem("racer_solo_best");
+    return saved ? parseInt(saved, 10) : null;
+  });
+  const singleRaceStartRef = useRef<number>(0);
+  const singleTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  const [singlePlayer, setSinglePlayer] = useState<Player>({
+    id: "solo_player",
+    name: userName || "Solo Driver",
+    color: userColor,
+    x: 0,
+    y: 0,
+    z: 0,
+    rotationY: 0,
+    speed: 0,
+    driftScore: 0,
+    isDrifting: false,
+    driftMeter: 0,
+    totalDriftScore: 0,
+    checkpoint: 0,
+    lap: 1,
+    finished: false,
+    finishTime: 0,
+    isHost: true,
+    ready: true,
+    place: 1,
+  });
+
+  // ==================== MULTIPLAYER STATE ====================
   const [roomInput, setRoomInput] = useState("");
   const [isJoined, setIsJoined] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
   const [connError, setConnError] = useState("");
-  // Real-time occupied colors list for specified room on login screen
   const [takenLobbyColors, setTakenLobbyColors] = useState<string[]>([]);
-
-  // Room synchronization states
   const [room, setRoom] = useState<Room | null>(null);
   const [myPlayerId, setMyPlayerId] = useState("");
-  
-  // HUD dynamics
   const [raceTimeMs, setRaceTimeMs] = useState(0);
   const [chatInput, setChatInput] = useState("");
   const [chatMessages, setChatMessages] = useState<Array<{ sender: string; text: string; color: string }>>([]);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
 
-  // Websocket ref
   const wsRef = useRef<WebSocket | null>(null);
   const raceTimerRef = useRef<NodeJS.Timeout | null>(null);
   const chatContainerRef = useRef<HTMLDivElement>(null);
   const isChatHoveredRef = useRef(false);
 
-  // Connection Handler
+  // Sync user profile name/color
+  useEffect(() => {
+    setSinglePlayer((prev) => ({
+      ...prev,
+      name: userName.trim() || "Solo Driver",
+      color: userColor,
+    }));
+  }, [userName, userColor]);
+
+  // ==================== SINGLE PLAYER HANDLERS ====================
+  function startSinglePlayerRace() {
+    localStorage.setItem("racer_name", userName.trim() || "Solo Driver");
+    localStorage.setItem("racer_color", userColor);
+
+    if (singleTimerRef.current) clearInterval(singleTimerRef.current);
+
+    setSinglePlayer({
+      id: "solo_player",
+      name: userName.trim() || "Solo Driver",
+      color: userColor,
+      x: 0,
+      y: 0,
+      z: 0,
+      rotationY: 0,
+      speed: 0,
+      driftScore: 0,
+      isDrifting: false,
+      driftMeter: 0,
+      totalDriftScore: 0,
+      checkpoint: 0,
+      lap: 1,
+      finished: false,
+      finishTime: 0,
+      isHost: true,
+      ready: true,
+      place: 1,
+    });
+
+    setSingleStatus("countdown");
+    setSingleCountdown(3);
+    setSingleRaceTimeMs(0);
+
+    let count = 3;
+    const countInterval = setInterval(() => {
+      count -= 1;
+      setSingleCountdown(count);
+      if (count <= 0) {
+        clearInterval(countInterval);
+        const startTime = Date.now();
+        singleRaceStartRef.current = startTime;
+        (window as any).raceStartTime = startTime;
+        setSingleStatus("racing");
+
+        if (singleTimerRef.current) clearInterval(singleTimerRef.current);
+        singleTimerRef.current = setInterval(() => {
+          setSingleRaceTimeMs(Date.now() - startTime);
+        }, 45);
+      }
+    }, 1000);
+  }
+
+  function handleSinglePlayerUpdate(stateUpdates: Partial<Player>) {
+    setSinglePlayer((prev) => {
+      const updated = { ...prev, ...stateUpdates };
+
+      if (stateUpdates.finished && !prev.finished) {
+        const finalTime = Date.now() - singleRaceStartRef.current;
+        updated.finishTime = finalTime;
+        updated.finished = true;
+        if (singleTimerRef.current) {
+          clearInterval(singleTimerRef.current);
+          singleTimerRef.current = null;
+        }
+        setSingleStatus("results");
+
+        setSingleBestTime((oldBest) => {
+          if (!oldBest || finalTime < oldBest) {
+            localStorage.setItem("racer_solo_best", finalTime.toString());
+            return finalTime;
+          }
+          return oldBest;
+        });
+      }
+
+      return updated;
+    });
+  }
+
+  function handleSinglePlayerRestart() {
+    startSinglePlayerRace();
+  }
+
+  function handleExitToMainMenu() {
+    if (singleTimerRef.current) {
+      clearInterval(singleTimerRef.current);
+      singleTimerRef.current = null;
+    }
+    if (raceTimerRef.current) {
+      clearInterval(raceTimerRef.current);
+      raceTimerRef.current = null;
+    }
+    if (wsRef.current) {
+      wsRef.current.close();
+      wsRef.current = null;
+    }
+    setIsJoined(false);
+    setRoom(null);
+    setSingleStatus("setup");
+    setGameMode(null);
+  }
+
+  // ==================== MULTIPLAYER HANDLERS ====================
   function handleConnect(joinedRoomId?: string) {
     if (!userName.trim()) return;
     setIsConnecting(true);
     setConnError("");
 
-    // Persist profile
     localStorage.setItem("racer_name", userName.trim());
     localStorage.setItem("racer_color", userColor);
 
     const targetRoomId = (joinedRoomId || roomInput || "LOBBY").trim().toUpperCase();
-
-    // Protocol resolution
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
     const host = window.location.host;
     const wsUrl = `${protocol}//${host}`;
@@ -75,7 +225,6 @@ export default function App() {
       ws.onopen = () => {
         setIsConnecting(false);
         setIsJoined(true);
-        // Request Join
         const joinPayload: WSMessage = {
           type: "join_room",
           roomId: targetRoomId,
@@ -91,7 +240,6 @@ export default function App() {
           switch (msg.type) {
             case "room_state":
               setRoom(msg.room);
-              // Find matching local player id
               const matchingId = Object.keys(msg.room.players).find(
                 (pId) =>
                   msg.room.players[pId].name === userName.trim() &&
@@ -103,10 +251,8 @@ export default function App() {
               break;
 
             case "game_started":
-              // Global start timestamp
               (window as any).raceStartTime = msg.startTime;
               setRaceTimeMs(0);
-              // Start local HUD timer counting duration
               if (raceTimerRef.current) clearInterval(raceTimerRef.current);
               raceTimerRef.current = setInterval(() => {
                 const elapsed = Date.now() - msg.startTime;
@@ -125,7 +271,7 @@ export default function App() {
               setChatMessages((prev) => [
                 ...prev,
                 { sender: msg.sender, text: msg.message, color: msg.color },
-              ].slice(-40)); // keep last 40 MSGPACKS
+              ].slice(-40));
               break;
 
             case "error":
@@ -158,7 +304,6 @@ export default function App() {
     }
   }
 
-  // Lobby interactions
   function handleSendReady(currentReadyState: boolean) {
     if (!wsRef.current) return;
     const readyMsg: WSMessage = { type: "ready", ready: !currentReadyState };
@@ -195,22 +340,33 @@ export default function App() {
     setChatMessages([]);
   }
 
-  // Cleanup timers on shutdown
   useEffect(() => {
+    const handleGlobalKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setIsSettingsOpen((prev) => !prev);
+      }
+    };
+    window.addEventListener("keydown", handleGlobalKeyDown);
     return () => {
-      if (raceTimerRef.current) clearInterval(raceTimerRef.current);
+      window.removeEventListener("keydown", handleGlobalKeyDown);
     };
   }, []);
 
-  // Autoscroll chat on newer messages if user is not hovering to read history
+  useEffect(() => {
+    return () => {
+      if (raceTimerRef.current) clearInterval(raceTimerRef.current);
+      if (singleTimerRef.current) clearInterval(singleTimerRef.current);
+    };
+  }, []);
+
   useEffect(() => {
     if (chatContainerRef.current && !isChatHoveredRef.current) {
       chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
     }
   }, [chatMessages]);
 
-  // Dynamically fetch and poll taken colors of entered room on setup screen to enforce distinctiveness
   useEffect(() => {
+    if (gameMode !== "multi") return;
     let active = true;
     const targetRoomId = (roomInput || "LOBBY").trim().toUpperCase();
 
@@ -235,24 +391,18 @@ export default function App() {
       active = false;
       clearInterval(interval);
     };
-  }, [roomInput]);
+  }, [roomInput, gameMode]);
 
-  // Compute leaderboard placement onHUD racer rankings
   const playersList: Player[] = room ? (Object.values(room.players) as Player[]) : [];
 
   const leaderboardRankings = [...playersList].sort((a, b) => {
-        // Finished sorting
-        if (a.finished && !b.finished) return -1;
-        if (!a.finished && b.finished) return 1;
-        if (a.finished && b.finished) return (a.place || 9) - (b.place || 9);
-
-        // Progress sorting
-        if (a.lap !== b.lap) return b.lap - a.lap;
-        if (a.checkpoint !== b.checkpoint) return b.checkpoint - a.checkpoint;
-
-        // Subordinate sorting by total drift score/speed
-        return b.totalDriftScore - a.totalDriftScore;
-      });
+    if (a.finished && !b.finished) return -1;
+    if (!a.finished && b.finished) return 1;
+    if (a.finished && b.finished) return (a.place || 9) - (b.place || 9);
+    if (a.lap !== b.lap) return b.lap - a.lap;
+    if (a.checkpoint !== b.checkpoint) return b.checkpoint - a.checkpoint;
+    return b.totalDriftScore - a.totalDriftScore;
+  });
 
   const localRacer = room && myPlayerId ? room.players[myPlayerId] : null;
 
@@ -261,61 +411,517 @@ export default function App() {
       theme === "dark" ? "bg-[#070913] text-slate-100" : "bg-slate-50 text-slate-800"
     }`}>
       
-      {/* GLOBAL THEME SWITCHER */}
-      <div className="absolute top-4 right-4 z-50 pointer-events-auto">
-        <button
-          onClick={toggleTheme}
-          className={`p-2.5 rounded-xl border shadow-lg backdrop-blur-md transition-all duration-300 flex items-center justify-center gap-1.5 ${
-            theme === "dark"
-              ? "bg-slate-900/80 border-slate-800 text-amber-400 hover:text-amber-300 hover:bg-slate-800/80"
-              : "bg-white/95 border-slate-200 text-slate-700 hover:text-indigo-650 hover:bg-slate-100 shadow"
-          }`}
-          title={`Switch to ${theme === "dark" ? "Light" : "Dark"} Mode`}
-        >
-          {theme === "dark" ? (
-            <>
-              <Sun className="w-4 h-4 text-amber-400" />
-              <span className="font-mono text-[10px] uppercase font-bold tracking-wider hidden sm:inline">Light Mode</span>
-            </>
-          ) : (
-            <>
-              <Moon className="w-4 h-4 text-indigo-500" />
-              <span className="font-mono text-[10px] uppercase font-bold tracking-wider hidden sm:inline">Dark Mode</span>
-            </>
-          )}
-        </button>
-      </div>
+      {/* GLOBAL THEME SWITCHER - Shown on menu and setup screens */}
+      {(!gameMode || (gameMode === "single" && singleStatus === "setup") || (gameMode === "multi" && !isJoined)) && (
+        <div className="absolute top-4 right-4 z-50 pointer-events-auto">
+          <button
+            onClick={toggleTheme}
+            className={`p-2.5 rounded-xl border shadow-lg backdrop-blur-md transition-all duration-300 flex items-center justify-center gap-1.5 ${
+              theme === "dark"
+                ? "bg-slate-900/80 border-slate-800 text-amber-400 hover:text-amber-300 hover:bg-slate-800/80"
+                : "bg-white/95 border-slate-200 text-slate-700 hover:text-indigo-650 hover:bg-slate-100 shadow"
+            }`}
+            title={`Switch to ${theme === "dark" ? "Light" : "Dark"} Mode`}
+          >
+            {theme === "dark" ? (
+              <>
+                <Sun className="w-4 h-4 text-amber-400" />
+                <span className="font-mono text-[10px] uppercase font-bold tracking-wider hidden sm:inline">Light Mode</span>
+              </>
+            ) : (
+              <>
+                <Moon className="w-4 h-4 text-indigo-500" />
+                <span className="font-mono text-[10px] uppercase font-bold tracking-wider hidden sm:inline">Dark Mode</span>
+              </>
+            )}
+          </button>
+        </div>
+      )}
 
-      {/* 1. OFF-BOARD SCREEN: AUTH & ROOM LAUNCHER */}
-      {!isJoined && (
-        <div id="start-screen" className="flex-1 w-full max-w-lg mx-auto flex flex-col items-center justify-center px-6 py-12 overflow-y-auto">
-          {/* Centered minimalist master card */}
-          <div className={`w-full p-8 rounded-2xl border transition-colors duration-300 relative ${
-            theme === "dark" ? "bg-slate-900/60 border-slate-800/80 shadow-2xl" : "bg-white border-slate-200/80 shadow-xl"
-          }`}>
-            <div className="flex flex-col items-center text-center mb-8">
-              <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-indigo-500/10 border border-indigo-400/20 text-indigo-400 font-mono text-[10px] font-bold tracking-wider uppercase mb-3">
-                <Sparkles className="w-3.5 h-3.5" /> High-Performance Physics Mode Enabled
+      {/* ========================================================================= */}
+      {/* 1. FIRST SCREEN: MODE SELECTION (SINGLE PLAYER OR MULTIPLAYER)           */}
+      {/* ========================================================================= */}
+      {gameMode === null && (
+        <div className="flex-1 w-full max-w-3xl mx-auto flex flex-col items-center justify-center px-4 py-8 overflow-y-auto z-10">
+          <div className="text-center mb-8">
+            <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-indigo-600/10 border border-indigo-500/20 text-4xl mb-3 shadow-inner">
+              🏎️
+            </div>
+            <h1 className={`text-3xl sm:text-4xl font-black tracking-tight uppercase ${
+              theme === "dark" ? "text-white" : "text-slate-900"
+            }`}>
+              3D Drift Arena
+            </h1>
+            <p className={`text-sm mt-1.5 max-w-md mx-auto ${
+              theme === "dark" ? "text-slate-400" : "text-slate-600"
+            }`}>
+              Precision racing simulation with high-speed drifts, nitro acceleration, and live telemetry GPS tracking.
+            </p>
+          </div>
+
+          <div className="w-full grid grid-cols-1 sm:grid-cols-2 gap-5 mb-8">
+            {/* SINGLE PLAYER CARD */}
+            <div
+              onClick={() => setGameMode("single")}
+              className={`group cursor-pointer p-6 rounded-2xl border-2 transition-all duration-200 flex flex-col justify-between hover:scale-[1.02] active:scale-[0.99] relative overflow-hidden shadow-lg ${
+                theme === "dark"
+                  ? "bg-slate-900/90 border-slate-800 hover:border-indigo-500 hover:shadow-indigo-500/10"
+                  : "bg-white border-slate-200 hover:border-indigo-600 hover:shadow-indigo-500/10"
+              }`}
+            >
+              <div className="absolute top-0 right-0 px-3 py-1 bg-indigo-600 text-white font-mono text-[9px] font-extrabold uppercase rounded-bl-xl tracking-wider">
+                Solo Mode
               </div>
-              <h1 className={`text-3xl font-black tracking-tight leading-tight uppercase ${
+
+              <div>
+                <div className="w-12 h-12 rounded-xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-indigo-500 mb-4 group-hover:bg-indigo-600 group-hover:text-white transition-colors">
+                  <User className="w-6 h-6" />
+                </div>
+                <h2 className={`text-xl font-black tracking-tight ${
+                  theme === "dark" ? "text-white" : "text-slate-900"
+                }`}>
+                  Single Player
+                </h2>
+                <p className={`text-xs mt-1.5 leading-relaxed ${
+                  theme === "dark" ? "text-slate-400" : "text-slate-500"
+                }`}>
+                  Drive immediately on the race track. Practice high-speed drifts, fire nitro boosts, master tight corners, and set your best lap records.
+                </p>
+
+                <div className="mt-4 pt-4 border-t border-slate-200/60 dark:border-slate-800/80 space-y-1.5 text-[11px] font-mono">
+                  <div className="flex items-center gap-2 text-indigo-500 dark:text-indigo-400">
+                    <Zap className="w-3.5 h-3.5 shrink-0" /> Instant track access & practice
+                  </div>
+                  <div className="flex items-center gap-2 text-indigo-500 dark:text-indigo-400">
+                    <Compass className="w-3.5 h-3.5 shrink-0" /> Live GPS Minimap & speedometer
+                  </div>
+                  <div className="flex items-center gap-2 text-indigo-500 dark:text-indigo-400">
+                    <Trophy className="w-3.5 h-3.5 shrink-0" /> Personal best lap time tracking
+                  </div>
+                </div>
+              </div>
+
+              <button
+                className="mt-6 w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-mono text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-2 shadow group-hover:shadow-md"
+              >
+                DRIVE SOLO <ArrowRight className="w-4 h-4 group-hover:translate-x-0.5 transition-transform" />
+              </button>
+            </div>
+
+            {/* MULTIPLAYER CARD */}
+            <div
+              onClick={() => setGameMode("multi")}
+              className={`group cursor-pointer p-6 rounded-2xl border-2 transition-all duration-200 flex flex-col justify-between hover:scale-[1.02] active:scale-[0.99] relative overflow-hidden shadow-lg ${
+                theme === "dark"
+                  ? "bg-slate-900/90 border-slate-800 hover:border-pink-500 hover:shadow-pink-500/10"
+                  : "bg-white border-slate-200 hover:border-pink-600 hover:shadow-pink-500/10"
+              }`}
+            >
+              <div className="absolute top-0 right-0 px-3 py-1 bg-pink-600 text-white font-mono text-[9px] font-extrabold uppercase rounded-bl-xl tracking-wider">
+                Online Grid
+              </div>
+
+              <div>
+                <div className="w-12 h-12 rounded-xl bg-pink-500/10 border border-pink-500/20 flex items-center justify-center text-pink-500 mb-4 group-hover:bg-pink-600 group-hover:text-white transition-colors">
+                  <Users className="w-6 h-6" />
+                </div>
+                <h2 className={`text-xl font-black tracking-tight ${
+                  theme === "dark" ? "text-white" : "text-slate-900"
+                }`}>
+                  Multiplayer Arena
+                </h2>
+                <p className={`text-xs mt-1.5 leading-relaxed ${
+                  theme === "dark" ? "text-slate-400" : "text-slate-500"
+                }`}>
+                  Join or host live race lobbies. Race side-by-side against other players online with real-time positional sync and in-game chat.
+                </p>
+
+                <div className="mt-4 pt-4 border-t border-slate-200/60 dark:border-slate-800/80 space-y-1.5 text-[11px] font-mono">
+                  <div className="flex items-center gap-2 text-pink-500 dark:text-pink-400">
+                    <Users className="w-3.5 h-3.5 shrink-0" /> Live synchronized racer cars
+                  </div>
+                  <div className="flex items-center gap-2 text-pink-500 dark:text-pink-400">
+                    <Flag className="w-3.5 h-3.5 shrink-0" /> Real-time placement standings
+                  </div>
+                  <div className="flex items-center gap-2 text-pink-500 dark:text-pink-400">
+                    <MessageCircle className="w-3.5 h-3.5 shrink-0" /> Live crew communications chat
+                  </div>
+                </div>
+              </div>
+
+              <button
+                className="mt-6 w-full py-3 bg-gradient-to-r from-pink-600 to-indigo-600 hover:from-pink-700 hover:to-indigo-700 text-white font-mono text-xs font-bold rounded-xl transition-all flex items-center justify-center gap-2 shadow group-hover:shadow-md"
+              >
+                ENTER MULTIPLAYER <ArrowRight className="w-4 h-4 group-hover:translate-x-0.5 transition-transform" />
+              </button>
+            </div>
+          </div>
+
+          {/* CONTROLS REMINDER FOOTER */}
+          <div className={`p-4 rounded-xl border max-w-md w-full text-center ${
+            theme === "dark" ? "bg-slate-900/60 border-slate-800 text-slate-400" : "bg-white/80 border-slate-200 text-slate-600"
+          }`}>
+            <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-indigo-500 dark:text-indigo-400 mr-2">
+              CONTROLS:
+            </span>
+            <span className="text-xs font-sans">
+              <strong>▲ / ▼</strong> Accelerate / Brake &bull; <strong>◀ / ▶</strong> Steer &bull; <strong className="text-indigo-600 dark:text-indigo-400">SPACE</strong> Nitro Boost &bull; <strong>R</strong> Respawn
+            </span>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* 2. SINGLE PLAYER MODE: CUSTOMIZATION SETUP SCREEN                        */}
+      {/* ========================================================================= */}
+      {gameMode === "single" && singleStatus === "setup" && (
+        <div className="flex-1 w-full max-w-md mx-auto flex flex-col items-center justify-center px-4 py-8 overflow-y-auto z-10">
+          <div className={`w-full p-6 sm:p-8 rounded-2xl border transition-colors duration-300 relative ${
+            theme === "dark" 
+              ? "bg-slate-900 border-slate-800 shadow-2xl" 
+              : "bg-white border-slate-200/80 shadow-xl"
+          }`}>
+            {/* Top Back Navigation */}
+            <button
+              onClick={handleExitToMainMenu}
+              className={`mb-4 inline-flex items-center gap-1.5 text-xs font-mono font-semibold transition-colors ${
+                theme === "dark" ? "text-slate-400 hover:text-slate-200" : "text-slate-500 hover:text-slate-800"
+              }`}
+            >
+              <ChevronLeft className="w-4 h-4" /> Back to Mode Select
+            </button>
+
+            <div className="flex flex-col items-center text-center mb-6">
+              <span className="text-4xl mb-2">🏁</span>
+              <h1 className={`text-2xl font-extrabold tracking-tight uppercase ${
                 theme === "dark" ? "text-white" : "text-slate-900"
               }`}>
-                DRIFT LOBBY
+                Single Player Setup
               </h1>
-              <p className={`text-xs mt-2 leading-relaxed ${
-                theme === "dark" ? "text-slate-400" : "text-slate-650"
+              <p className={`text-xs mt-1 max-w-xs ${
+                theme === "dark" ? "text-slate-400" : "text-slate-500"
               }`}>
-                Choose your name, select an available vehicle color, and enter the active race grid.
+                Customize your racer and hit the track immediately.
               </p>
             </div>
 
-            <div className="space-y-5">
-              {/* Name field */}
-              <div className="flex flex-col gap-1.5 text-left">
+            <div className="space-y-4">
+              {/* Nickname input */}
+              <div className="flex flex-col gap-1 text-left">
                 <label className={`text-[10px] font-mono font-bold tracking-wider uppercase ${
                   theme === "dark" ? "text-slate-400" : "text-slate-500"
                 }`}>
-                  What is your name?
+                  1. Driver Nickname:
+                </label>
+                <input
+                  type="text"
+                  maxLength={14}
+                  value={userName}
+                  onChange={(e) => setUserName(e.target.value.replace(/[^a-zA-Z0-9 ]/g, ""))}
+                  placeholder="Enter your name..."
+                  className={`w-full px-4 py-2.5 rounded-xl font-mono text-sm outline-none transition-all duration-300 ${
+                    theme === "dark"
+                      ? "bg-slate-950 border border-slate-800 focus:border-indigo-500 text-slate-100 focus:ring-1 focus:ring-indigo-500"
+                      : "bg-slate-100/60 border border-slate-200 focus:border-indigo-600 focus:bg-white text-slate-900 focus:ring-1 focus:ring-indigo-600"
+                  }`}
+                />
+              </div>
+
+              {/* Color swatch selection */}
+              <div className="flex flex-col gap-1 text-left">
+                <label className={`text-[10px] font-mono font-bold tracking-wider uppercase ${
+                  theme === "dark" ? "text-slate-400" : "text-slate-500"
+                }`}>
+                  2. Choose Vehicle Paint:
+                </label>
+                <div className="grid grid-cols-6 gap-2 pt-1">
+                  {CAR_COLOR_PRESETS.map((color) => {
+                    const isSelected = userColor.toLowerCase() === color.hex.toLowerCase();
+                    return (
+                      <button
+                        key={color.hex}
+                        onClick={() => setUserColor(color.hex)}
+                        className={`h-9 rounded-xl border-2 transition-transform duration-75 relative flex items-center justify-center ${
+                          isSelected
+                            ? "border-indigo-500 scale-105 shadow-md"
+                            : "border-transparent hover:scale-105"
+                        }`}
+                        style={{ backgroundColor: color.hex }}
+                        title={color.name}
+                      >
+                        {isSelected && (
+                          <CheckCircle className="w-4 h-4 text-slate-950 drop-shadow-md bg-white rounded-full" />
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Solo Best Time stats if exists */}
+              {singleBestTime && (
+                <div className={`p-3 rounded-xl border flex items-center justify-between font-mono text-xs ${
+                  theme === "dark" ? "bg-slate-950/60 border-slate-800" : "bg-slate-50 border-slate-200"
+                }`}>
+                  <span className="text-slate-500 flex items-center gap-1.5">
+                    <Trophy className="w-3.5 h-3.5 text-yellow-500" /> Best Record:
+                  </span>
+                  <span className="font-bold text-indigo-500 dark:text-indigo-400">
+                    {formatTime(singleBestTime)}
+                  </span>
+                </div>
+              )}
+
+              {/* Launch Button */}
+              <button
+                onClick={startSinglePlayerRace}
+                className="w-full py-3.5 bg-indigo-600 hover:bg-indigo-700 text-white font-mono text-xs font-bold rounded-xl transition-all active:scale-[0.98] flex items-center justify-center gap-2 shadow-md mt-2"
+              >
+                <Play className="w-4 h-4 fill-white" /> START DRIVING NOW
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* 3. SINGLE PLAYER MODE: ACTIVE 3D RACE TRACK & TELEMETRY HUD              */}
+      {/* ========================================================================= */}
+      {gameMode === "single" && singleStatus !== "setup" && (
+        <div className="flex-1 flex flex-col relative w-full h-full">
+          {/* Main 3D Canvas Viewport */}
+          <div className="flex-1 relative bg-slate-950 flex items-center justify-center">
+            <RaceCanvas
+              localPlayer={singlePlayer}
+              remotePlayers={[]}
+              activeRoomStatus={singleStatus}
+              onUpdateState={handleSinglePlayerUpdate}
+              theme={theme}
+            />
+
+            {/* COUNTDOWN OVERLAY TRIGGER */}
+            {singleStatus === "countdown" && (
+              <div className="absolute inset-0 bg-black/60 flex flex-col items-center justify-center z-40 backdrop-blur-sm select-none">
+                <div className="text-[11px] font-mono font-bold text-indigo-400 tracking-widest uppercase mb-1 animate-pulse">
+                  Single Player Race Starting
+                </div>
+                <div className="text-8xl font-black font-sans text-transparent bg-clip-text bg-gradient-to-b from-indigo-300 via-pink-400 to-pink-600 tracking-tighter scale-125 select-none transition animate-pulse">
+                  {singleCountdown > 0 ? singleCountdown : "GO!"}
+                </div>
+                <div className="text-[10px] font-mono text-slate-400 tracking-wider mt-4">
+                  Arrow Keys / WASD to steer, Space for Nitro, R to Reset.
+                </div>
+              </div>
+            )}
+
+            {/* REALTIME HUD OVERLAY */}
+            {singleStatus === "racing" && (
+              <div className="absolute inset-0 z-10 pointer-events-none flex flex-col justify-between p-4 sm:p-6 select-none">
+                {/* HUD Top Panel */}
+                <div className="flex justify-between items-start">
+                  {/* Progress Indicators */}
+                  <div className="flex flex-col gap-2 bg-slate-950/80 border border-slate-800/60 p-3.5 rounded-xl backdrop-blur">
+                    <div className="flex items-center gap-3">
+                      <div className="flex flex-col text-left">
+                        <span className="text-[9px] font-mono text-slate-500 uppercase tracking-wider">Current Lap</span>
+                        <span className="text-xl font-bold font-mono text-indigo-400 leading-none">
+                          LAP {Math.min(singlePlayer.lap, 3)} <span className="text-[11px] text-slate-500 font-normal">/ 3</span>
+                        </span>
+                      </div>
+                      <div className="h-6 w-[1px] bg-slate-800" />
+                      <div className="flex flex-col text-left">
+                        <span className="text-[9px] font-mono text-slate-500 uppercase tracking-wider">Checkpoint</span>
+                        <span className="text-xl font-bold font-mono text-pink-400 leading-none">
+                          CP {singlePlayer.checkpoint + 1} <span className="text-[11px] text-slate-500 font-normal">/ 5</span>
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="flex justify-between items-center border-t border-slate-900 pt-2 mt-1 font-mono text-[10px]">
+                      <span className="text-slate-500 uppercase">SCORE OVERALL</span>
+                      <span className="text-yellow-400 font-bold tracking-tight">
+                        {singlePlayer.totalDriftScore.toLocaleString()} PTS
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* High Precision Timer */}
+                  <div className="bg-slate-950/80 border border-slate-800/60 h-11 px-4 rounded-xl backdrop-blur flex items-center justify-center font-mono">
+                    <div className="text-slate-500 text-[10px] uppercase font-bold tracking-wider mr-2">TIME:</div>
+                    <div className="text-base font-extrabold text-slate-200 tracking-tight select-all pointer-events-auto">
+                      {formatTime(singleRaceTimeMs)}
+                    </div>
+                  </div>
+
+                  {/* Right Side: Action toolbar */}
+                  <div className="flex items-center gap-2 pointer-events-auto bg-slate-950/80 border border-slate-800/60 p-1.5 rounded-xl backdrop-blur">
+                    <button
+                      onClick={() => setIsSettingsOpen(true)}
+                      className="px-2.5 py-2 bg-slate-900 hover:bg-slate-800 border border-slate-700/70 text-slate-200 hover:text-white rounded-lg text-[10px] font-mono font-bold transition flex items-center gap-1 shadow-sm"
+                      title="Settings Menu (ESC)"
+                    >
+                      <Settings className="w-3.5 h-3.5 text-slate-300" />
+                      <span className="hidden sm:inline">SETTINGS</span>
+                      <span className="text-[9px] bg-slate-800 px-1 py-0.2 rounded text-slate-400 border border-slate-700">ESC</span>
+                    </button>
+                    <button
+                      onClick={handleSinglePlayerRestart}
+                      className="px-3 py-2 bg-slate-900 hover:bg-slate-800 border border-slate-700/70 text-slate-200 hover:text-white rounded-lg text-[10px] font-mono font-bold transition flex items-center gap-1.5 shadow-sm"
+                      title="Restart Race (R)"
+                    >
+                      <RotateCcw className="w-3.5 h-3.5 text-indigo-400" />
+                      <span>RESTART</span>
+                    </button>
+                    <button
+                      onClick={handleExitToMainMenu}
+                      className="px-3 py-2 bg-slate-900 hover:bg-red-950/60 border border-slate-700/70 hover:border-red-500/50 text-slate-300 hover:text-red-300 rounded-lg text-[10px] font-mono font-bold transition flex items-center gap-1.5 shadow-sm"
+                      title="Exit to Mode Select"
+                    >
+                      <ChevronLeft className="w-3.5 h-3.5 text-slate-400" />
+                      <span>EXIT</span>
+                    </button>
+                    <button
+                      onClick={toggleTheme}
+                      className="p-2 bg-slate-900 hover:bg-slate-800 border border-slate-700/70 rounded-lg transition flex items-center justify-center text-amber-400 shadow-sm"
+                      title={`Switch to ${theme === "dark" ? "Light" : "Dark"} Mode`}
+                    >
+                      {theme === "dark" ? (
+                        <Sun className="w-3.5 h-3.5 text-amber-400" />
+                      ) : (
+                        <Moon className="w-3.5 h-3.5 text-indigo-400" />
+                      )}
+                    </button>
+                  </div>
+                </div>
+
+                {/* HUD Bottom Panel: GPS Minimap and Speedometer */}
+                <div className="flex justify-between items-end">
+                  {/* Left Bottom corner: Dynamic GPS Minimap */}
+                  <div className="flex flex-col gap-2 pointer-events-auto items-start">
+                    <Minimap
+                      players={[singlePlayer]}
+                      myPlayerId={singlePlayer.id}
+                      theme={theme}
+                    />
+
+                    <div className="bg-slate-950/80 border border-slate-800/60 px-3 py-1.5 rounded-xl backdrop-blur text-left">
+                      <div className="text-[8px] font-mono font-bold text-slate-500 uppercase tracking-widest">
+                        SOLO PRACTICE MODE
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Right Bottom corner: Digital Speed Gauge Widget */}
+                  <div className="pointer-events-auto">
+                    <Speedometer
+                      speed={singlePlayer.speed}
+                      driftMeter={singlePlayer.driftMeter}
+                      driftScore={singlePlayer.driftScore}
+                      isDrifting={singlePlayer.isDrifting}
+                      isBoosting={singlePlayer.speed > 62}
+                      theme={theme}
+                    />
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* RESULTS SCREEN FOR SINGLE PLAYER */}
+            {singleStatus === "results" && (
+              <div className="absolute inset-x-4 top-12 bottom-12 bg-slate-950/95 border border-indigo-500 max-w-md mx-auto rounded-2xl shadow-2xl backdrop-blur-lg z-40 flex flex-col justify-between p-6 select-text pointer-events-auto animate-scaleIn">
+                <div className="text-center">
+                  <div className="text-4xl mb-2">🏆</div>
+                  <div className="text-[11px] font-mono font-bold text-indigo-400 tracking-widest uppercase mb-1">
+                    COURSE COMPLETED
+                  </div>
+                  <h2 className="text-2xl font-black font-sans text-white tracking-tight uppercase">
+                    RACE FINISHED!
+                  </h2>
+                  <p className="text-xs text-slate-400 mt-1">
+                    Great driving, {singlePlayer.name}! Here is your single player summary.
+                  </p>
+
+                  <div className="mt-6 space-y-2.5 font-mono text-xs text-left">
+                    <div className="flex justify-between p-3 bg-slate-900 border border-slate-800 rounded-xl">
+                      <span className="text-slate-500 uppercase">FINAL TIME</span>
+                      <span className="text-indigo-300 font-bold">{formatTime(singlePlayer.finishTime || singleRaceTimeMs)}</span>
+                    </div>
+
+                    <div className="flex justify-between p-3 bg-slate-900 border border-slate-800 rounded-xl">
+                      <span className="text-slate-500 uppercase">TOTAL DRIFT SCORE</span>
+                      <span className="text-yellow-400 font-bold">{singlePlayer.totalDriftScore.toLocaleString()} PTS</span>
+                    </div>
+
+                    {singleBestTime && (
+                      <div className="flex justify-between p-3 bg-indigo-950/30 border border-indigo-500/30 rounded-xl">
+                        <span className="text-indigo-300 uppercase">ALL-TIME BEST</span>
+                        <span className="text-green-400 font-bold">{formatTime(singleBestTime)}</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <div className="mt-6 flex gap-3 pt-4 border-t border-slate-900">
+                  <button
+                    onClick={handleSinglePlayerRestart}
+                    className="flex-1 py-3 bg-indigo-600 hover:bg-indigo-700 font-mono text-xs font-bold text-white rounded-xl transition shadow flex items-center justify-center gap-1.5"
+                  >
+                    <RotateCcw className="w-4 h-4" /> DRIVE AGAIN
+                  </button>
+                  <button
+                    onClick={handleExitToMainMenu}
+                    className="px-5 py-3 border border-slate-800 hover:bg-slate-900 font-mono text-xs text-slate-300 rounded-xl transition"
+                  >
+                    MAIN MENU
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* 4. MULTIPLAYER MODE: LOBBY JOIN FORM                                     */}
+      {/* ========================================================================= */}
+      {gameMode === "multi" && !isJoined && (
+        <div id="start-screen" className="flex-1 w-full max-w-md mx-auto flex flex-col items-center justify-center px-4 py-8 overflow-y-auto z-10">
+          <div className={`w-full p-6 sm:p-8 rounded-2xl border transition-colors duration-300 relative ${
+            theme === "dark" 
+              ? "bg-slate-900 border-slate-800 shadow-2xl" 
+              : "bg-white border-slate-200/80 shadow-xl"
+          }`}>
+            {/* Top Back Navigation */}
+            <button
+              onClick={handleExitToMainMenu}
+              className={`mb-4 inline-flex items-center gap-1.5 text-xs font-mono font-semibold transition-colors ${
+                theme === "dark" ? "text-slate-400 hover:text-slate-200" : "text-slate-500 hover:text-slate-800"
+              }`}
+            >
+              <ChevronLeft className="w-4 h-4" /> Back to Mode Select
+            </button>
+
+            <div className="flex flex-col items-center text-center mb-6">
+              <span className="text-4xl mb-2">🌐</span>
+              <h1 className={`text-2xl font-extrabold tracking-tight uppercase ${
+                theme === "dark" ? "text-white" : "text-slate-900"
+              }`}>
+                Multiplayer Lobby
+              </h1>
+              <p className={`text-xs mt-1 max-w-xs ${
+                theme === "dark" ? "text-slate-400" : "text-slate-500"
+              }`}>
+                Join a room lobby, customize your color, and race live online.
+              </p>
+            </div>
+
+            <div className="space-y-4">
+              {/* Name field */}
+              <div className="flex flex-col gap-1 text-left">
+                <label className={`text-[10px] font-mono font-bold tracking-wider uppercase ${
+                  theme === "dark" ? "text-slate-400" : "text-slate-500"
+                }`}>
+                  1. What is your name?
                 </label>
                 <input
                   type="text"
@@ -323,20 +929,20 @@ export default function App() {
                   value={userName}
                   onChange={(e) => setUserName(e.target.value.replace(/[^a-zA-Z0-9 ]/g, ""))}
                   placeholder="Enter your nickname..."
-                  className={`w-full px-4 py-3 rounded-xl font-mono text-sm outline-none transition-all duration-300 ${
+                  className={`w-full px-4 py-2.5 rounded-xl font-mono text-sm outline-none transition-all duration-300 ${
                     theme === "dark"
                       ? "bg-slate-950 border border-slate-800 focus:border-indigo-500 text-slate-100 focus:ring-1 focus:ring-indigo-500"
-                      : "bg-slate-100/50 border border-slate-200 focus:border-indigo-600 focus:bg-white text-slate-900 focus:ring-1 focus:ring-indigo-600"
+                      : "bg-slate-100/60 border border-slate-200 focus:border-indigo-600 focus:bg-white text-slate-900 focus:ring-1 focus:ring-indigo-600"
                   }`}
                 />
               </div>
 
               {/* Color swatch selection */}
-              <div className="flex flex-col gap-1.5 text-left">
+              <div className="flex flex-col gap-1 text-left">
                 <label className={`text-[10px] font-mono font-bold tracking-wider uppercase ${
                   theme === "dark" ? "text-slate-400" : "text-slate-500"
                 }`}>
-                  Choose your car color:
+                  2. Choose your car color:
                 </label>
                 <div className="grid grid-cols-6 gap-2 pt-1">
                   {CAR_COLOR_PRESETS.map((color) => {
@@ -348,9 +954,9 @@ export default function App() {
                         key={color.hex}
                         disabled={isTaken}
                         onClick={() => setUserColor(color.hex)}
-                        className={`h-11 rounded-xl border-2 transition-transform duration-75 relative flex items-center justify-center ${
+                        className={`h-9 rounded-xl border-2 transition-transform duration-75 relative flex items-center justify-center ${
                           isSelected
-                            ? "border-sky-400 scale-105 shadow-md"
+                            ? "border-indigo-500 scale-105 shadow-md"
                             : isTaken
                             ? "opacity-15 cursor-not-allowed border-transparent"
                             : "border-transparent hover:scale-105"
@@ -369,55 +975,57 @@ export default function App() {
                   })}
                 </div>
                 {takenLobbyColors.length > 0 && (
-                  <p className="text-[9px] text-slate-500 font-mono mt-1">
-                    * Colors struck out are already chosen by online racers in this room.
+                  <p className="text-[9px] text-red-500 font-mono mt-1">
+                    * Crossed out colors are already chosen by other players in this lobby.
                   </p>
                 )}
               </div>
 
               {/* Room input */}
-              <div className="flex flex-col gap-1.5 text-left">
+              <div className="flex flex-col gap-1 text-left">
                 <label className={`text-[10px] font-mono font-bold tracking-wider uppercase ${
                   theme === "dark" ? "text-slate-400" : "text-slate-500"
                 }`}>
-                  Room Code (Optional)
+                  3. Join code (Optional):
                 </label>
                 <input
                   type="text"
                   maxLength={10}
                   value={roomInput}
                   onChange={(e) => setRoomInput(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ""))}
-                  placeholder="LOBBY"
-                  className={`w-full px-4 py-3 rounded-xl font-mono text-sm outline-none uppercase tracking-wider transition-all duration-300 ${
+                  placeholder="LOBBY (Public)"
+                  className={`w-full px-4 py-2.5 rounded-xl font-mono text-sm outline-none uppercase tracking-wider transition-all duration-300 ${
                     theme === "dark"
-                      ? "bg-slate-950 border border-slate-800 focus:border-indigo-500 text-slate-100 focus:ring-1 focus:ring-indigo-500"
-                      : "bg-slate-100/50 border border-slate-200 focus:border-indigo-600 focus:bg-white text-slate-900 focus:ring-1 focus:ring-indigo-600"
+                      ? "bg-slate-950 border border-slate-800 focus:border-indigo-500 text-slate-100"
+                      : "bg-slate-100/60 border border-slate-200 focus:border-indigo-600 focus:bg-white text-slate-900"
                   }`}
                 />
               </div>
 
               {connError && (
-                <div className="p-3 bg-red-950/40 border border-red-500/20 rounded-xl text-xs font-mono text-red-400">
+                <div className="p-3 bg-red-50 text-red-650 border border-red-200 rounded-xl text-xs font-mono">
                   ⚠️ {connError}
                 </div>
               )}
 
+              {/* Action trigger button */}
               <button
                 onClick={() => handleConnect()}
                 disabled={isConnecting || !userName.trim()}
-                className="w-full py-3 bg-gradient-to-r from-pink-500 to-indigo-605 hover:from-pink-600 hover:to-indigo-700 disabled:from-slate-800 disabled:to-slate-800 disabled:opacity-50 text-white font-mono text-xs font-bold rounded-xl transition-all active:scale-[0.98] flex items-center justify-center gap-1.5 shadow-md mt-4"
+                className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-300 disabled:text-slate-500 text-white font-mono text-xs font-bold rounded-xl transition-all active:scale-[0.98] flex items-center justify-center gap-1.5 shadow-md mt-2"
               >
-                {isConnecting ? "ESTABLISHING SIGNAL..." : "JOIN SESSION & DRIFT"} <ArrowRight className="w-4 h-4" />
+                {isConnecting ? "CONNECTING..." : "ENTER LOBBY & PLAY"} <ArrowRight className="w-4 h-4" />
               </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* 2. ON-BOARD INTEGRATED RACE SCREEN SYSTEM */}
-      {isJoined && room && (
+      {/* ========================================================================= */}
+      {/* 5. MULTIPLAYER MODE: CONNECTED SESSION & RACE VIEW                        */}
+      {/* ========================================================================= */}
+      {gameMode === "multi" && isJoined && room && (
         <div className="flex-1 flex flex-col md:flex-row relative">
-
           {/* LEFT CHASSIS: LOBBY & RACE CONTROLLER AREA */}
           <div className="w-full md:w-80 border-b md:border-b-0 md:border-r border-slate-900 bg-slate-950/70 p-4 shrink-0 flex flex-col justify-between max-h-[40vh] md:max-h-full overflow-y-auto">
             <div>
@@ -599,7 +1207,6 @@ export default function App() {
 
           {/* MAIN CHASSIS: THE THREE.JS VIEWPORT & HUD LAYERS */}
           <div className="flex-1 relative bg-slate-950 flex items-center justify-center">
-
             <RaceCanvas
               localPlayer={localRacer || ({} as Player)}
               remotePlayers={playersList.filter((p) => p.id !== myPlayerId)}
@@ -618,7 +1225,7 @@ export default function App() {
                   {room.countdown > 0 ? room.countdown : "GO!"}
                 </div>
                 <div className="text-[10px] font-mono text-slate-500 tracking-wider mt-4">
-                  W / S to accelerate, A / D to steer, Space to Drift, R to Reset.
+                  W / S to accelerate, A / D to steer, Space for Nitro, R to Reset.
                 </div>
               </div>
             )}
@@ -627,9 +1234,8 @@ export default function App() {
             {room.status === "racing" && localRacer && (
               <div className="absolute inset-0 z-10 pointer-events-none flex flex-col justify-between p-4 sm:p-6 select-none">
                 
-                {/* HUD Top panel: Lap, Checkpoint, and Time clock */}
+                {/* HUD Top panel */}
                 <div className="flex justify-between items-start">
-                  
                   {/* Left Side: Progress Indicators */}
                   <div className="flex flex-col gap-2 bg-slate-950/80 border border-slate-800/60 p-3.5 rounded-xl backdrop-blur">
                     <div className="flex items-center gap-3">
@@ -648,7 +1254,6 @@ export default function App() {
                       </div>
                     </div>
 
-                    {/* Overall Total accumulated Drifts in game */}
                     <div className="flex justify-between items-center border-t border-slate-900 pt-2 mt-1 font-mono text-[10px]">
                       <span className="text-slate-500 uppercase">SCORE OVERALL</span>
                       <span className="text-yellow-400 font-bold tracking-tight">
@@ -665,16 +1270,46 @@ export default function App() {
                     </div>
                   </div>
 
-                  {/* Right Side: Keyboard controls map legend popup */}
-                  <div className="hidden sm:flex flex-col bg-slate-950/80 border border-slate-800/60 px-3 py-2 rounded-xl backdrop-blur font-mono text-[9px] text-left text-slate-400 space-y-0.5">
-                    <div>W / S : ACCEL / REVERSE</div>
-                    <div>A / D : STEER LEFT / RIGHT</div>
-                    <div>SPACE : DRIFT (HIGH SPEED)</div>
-                    <div>R : SPAWN TO RESCUE APEX</div>
+                  {/* Right Side: Action toolbar & Controls */}
+                  <div className="flex items-center gap-2 pointer-events-auto">
+                    <div className="hidden lg:flex flex-col bg-slate-950/80 border border-slate-800/60 px-3 py-1.5 rounded-xl backdrop-blur font-mono text-[9px] text-left text-slate-400 space-y-0.5">
+                      <div>▲ / ▼ : Drive &bull; ◀ / ▶ : Steer</div>
+                      <div>SPACE : Nitro &bull; R : Reset</div>
+                    </div>
+                    <div className="flex items-center gap-1.5 bg-slate-950/80 border border-slate-800/60 p-1.5 rounded-xl backdrop-blur">
+                      <button
+                        onClick={() => setIsSettingsOpen(true)}
+                        className="px-2.5 py-2 bg-slate-900 hover:bg-slate-800 border border-slate-700/70 text-slate-200 hover:text-white rounded-lg text-[10px] font-mono font-bold transition flex items-center gap-1 shadow-sm"
+                        title="Settings Menu (ESC)"
+                      >
+                        <Settings className="w-3.5 h-3.5 text-slate-300" />
+                        <span className="hidden sm:inline">SETTINGS</span>
+                        <span className="text-[9px] bg-slate-800 px-1 py-0.2 rounded text-slate-400 border border-slate-700">ESC</span>
+                      </button>
+                      <button
+                        onClick={handleDisconnect}
+                        className="px-3 py-2 bg-slate-900 hover:bg-red-950/60 border border-slate-700/70 hover:border-red-500/50 text-slate-300 hover:text-red-300 rounded-lg text-[10px] font-mono font-bold transition flex items-center gap-1.5 shadow-sm"
+                        title="Leave Multiplayer Grid"
+                      >
+                        <ChevronLeft className="w-3.5 h-3.5" />
+                        <span>LEAVE</span>
+                      </button>
+                      <button
+                        onClick={toggleTheme}
+                        className="p-2 bg-slate-900 hover:bg-slate-800 border border-slate-700/70 rounded-lg transition flex items-center justify-center text-amber-400 shadow-sm"
+                        title={`Switch to ${theme === "dark" ? "Light" : "Dark"} Mode`}
+                      >
+                        {theme === "dark" ? (
+                          <Sun className="w-3.5 h-3.5 text-amber-400" />
+                        ) : (
+                          <Moon className="w-3.5 h-3.5 text-indigo-400" />
+                        )}
+                      </button>
+                    </div>
                   </div>
                 </div>
 
-                {/* HUD Middle panel: Drift active alert screen flash or local status metrics */}
+                {/* HUD Middle panel */}
                 <div className="flex-1 flex items-center justify-center relative">
                   {localRacer.finished && (
                     <div className="p-8 bg-slate-950/95 border border-indigo-500 max-w-sm rounded-2xl shadow-2xl backdrop-blur-lg flex flex-col items-center z-30 pointer-events-auto animate-scaleIn">
@@ -700,38 +1335,44 @@ export default function App() {
                   )}
                 </div>
 
-                {/* HUD Bottom panel: Real-time placements lists & Gauge dial */}
+                {/* HUD Bottom panel: Standings & Speedometer & Minimap */}
                 <div className="flex justify-between items-end">
-                  
-                  {/* Left Bottom corner: Realtime placings order */}
-                  <div className="flex flex-col gap-1.5 bg-slate-950/80 border border-slate-800/60 p-3 rounded-xl backdrop-blur text-left min-w-[140px]">
-                    <div className="text-[8px] font-mono font-bold text-slate-500 uppercase tracking-widest mb-1">
-                      Placement Standings
-                    </div>
-                    {leaderboardRankings.map((p, idx) => (
-                      <div key={p.id} className="flex items-center gap-2 text-[11px] font-mono">
-                        <span className="w-4 text-slate-500 font-bold">#{idx + 1}</span>
-                        <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: p.color }} />
-                        <span className={`${p.id === myPlayerId ? "text-indigo-200 font-bold" : "text-slate-300"} truncate max-w-[80px]`}>
-                          {p.name}
-                        </span>
+                  {/* Left Bottom corner */}
+                  <div className="flex flex-col gap-2 pointer-events-auto items-start">
+                    <Minimap
+                      players={playersList}
+                      myPlayerId={myPlayerId}
+                      theme={theme}
+                    />
+
+                    <div className="flex flex-col gap-1.5 bg-slate-950/80 border border-slate-800/60 p-3 rounded-xl backdrop-blur text-left min-w-[140px]">
+                      <div className="text-[8px] font-mono font-bold text-slate-500 uppercase tracking-widest mb-1">
+                        Placement Standings
                       </div>
-                    ))}
+                      {leaderboardRankings.map((p, idx) => (
+                        <div key={p.id} className="flex items-center gap-2 text-[11px] font-mono">
+                          <span className="w-4 text-slate-500 font-bold">#{idx + 1}</span>
+                          <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: p.color }} />
+                          <span className={`${p.id === myPlayerId ? "text-indigo-200 font-bold" : "text-slate-300"} truncate max-w-[80px]`}>
+                            {p.name}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
                   </div>
 
-                  {/* Right Bottom corner: Digital Speed Gauge Widget */}
+                  {/* Right Bottom corner */}
                   <div className="pointer-events-auto">
                     <Speedometer
                       speed={localRacer.speed}
                       driftMeter={localRacer.driftMeter}
                       driftScore={localRacer.driftScore}
                       isDrifting={localRacer.isDrifting}
-                      isBoosting={localRacer.speed > 62} // Speed exceeding maximum normal speeds implies boosting
+                      isBoosting={localRacer.speed > 62}
                       theme={theme}
                     />
                   </div>
                 </div>
-
               </div>
             )}
 
@@ -773,8 +1414,6 @@ export default function App() {
                       </div>
                     ))}
                   </div>
-
-                  <Leaderboard />
                 </div>
 
                 <div className="mt-6 flex justify-end gap-2 border-t border-slate-900 pt-4">
@@ -818,19 +1457,45 @@ export default function App() {
 
                   <div className="bg-slate-950/90 border border-slate-900/60 p-4 rounded-xl text-left space-y-3 font-mono text-xs max-h-[140px] overflow-y-auto">
                     <div className="text-[9px] text-zinc-500 font-bold uppercase tracking-wider">Lobby Instructions</div>
-                    <div className="text-slate-300">🎮 Press <span className="text-pink-400 font-bold">W/S</span> to Accelerate or reverse reverse forward gears.</div>
-                    <div className="text-slate-300">🕹️ Press <span className="text-pink-400 font-bold">A/D</span> to slide tires.</div>
-                    <div className="text-slate-300">💫 Stand out during turns by holding <span className="text-pink-400 font-bold">Spacebar</span> to drift and receive Speed Boost rewards.</div>
-                    <div className="text-slate-300">🩹 If cornering trajectories fail, press <span className="text-indigo-400 font-bold">R</span> to revive.</div>
+                    <div className="text-slate-300">🎮 Press <span className="text-pink-400 font-bold">▲ / ▼ (or W/S)</span> to Accelerate or reverse.</div>
+                    <div className="text-slate-300">🕹️ Press <span className="text-pink-400 font-bold">◀ / ▶ (or A/D)</span> to steer left / right.</div>
+                    <div className="text-slate-300">🚀 Press <span className="text-pink-400 font-bold">Spacebar</span> for Nitro Boost and automatic drift when turning at speed!</div>
+                    <div className="text-slate-300">🩹 If you get stuck, press <span className="text-indigo-400 font-bold">R</span> to respawn on road.</div>
                   </div>
                 </div>
               </div>
             )}
-
           </div>
         </div>
       )}
 
+      {/* GLOBAL SETTINGS / PAUSE MODAL (TRIGGERED BY ESC OR SETTINGS BUTTON) */}
+      <SettingsModal
+        isOpen={isSettingsOpen}
+        onClose={() => setIsSettingsOpen(false)}
+        onRestart={() => {
+          if (gameMode === "single") {
+            handleSinglePlayerRestart();
+          } else if (gameMode === "multi") {
+            if (localRacer?.isHost) {
+              handleStartRaceByHost();
+            }
+          }
+        }}
+        onExit={() => {
+          if (gameMode === "single") {
+            handleExitToMainMenu();
+          } else if (gameMode === "multi") {
+            handleDisconnect();
+            setGameMode(null);
+          }
+        }}
+        theme={theme}
+        onToggleTheme={toggleTheme}
+        isMultiplayer={gameMode === "multi"}
+      />
+
     </div>
   );
 }
+

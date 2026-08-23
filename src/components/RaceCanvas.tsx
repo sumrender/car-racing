@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import * as THREE from "three";
 import { Player } from "../types";
+import { startNitroAudio, stopNitroAudio } from "../utils/audio";
 
 // Definitions of track spline points on the XZ plane (Y = 0)
 // Scaled for a fun speedrun length
@@ -68,6 +69,8 @@ export default function RaceCanvas({
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
+  const [isBoostingUI, setIsBoostingUI] = useState(false);
+
   // Keep often-changed props in Refs to prevent reconstructing Three.js on every frame
   const localPlayerRef = useRef<Player>(localPlayer);
   const remotePlayersRef = useRef<Player[]>(remotePlayers);
@@ -105,7 +108,7 @@ export default function RaceCanvas({
     x: 0,
     y: 0,
     z: 0,
-    rotationY: Math.PI, // Starting facing forward along the straightaway
+    rotationY: 0, // Starting facing forward along the straightaway (aligned with +Z)
     speed: 0,
     driftScore: 0,
     isDrifting: false,
@@ -128,7 +131,13 @@ export default function RaceCanvas({
       if (key === "s" || e.key === "ArrowDown") keysRef.current.s = true;
       if (key === "a" || e.key === "ArrowLeft") keysRef.current.a = true;
       if (key === "d" || e.key === "ArrowRight") keysRef.current.d = true;
-      if (e.key === " ") keysRef.current.space = true;
+      if (e.key === " " || e.code === "Space") {
+        if (!keysRef.current.space) {
+          startNitroAudio();
+          setIsBoostingUI(true);
+        }
+        keysRef.current.space = true;
+      }
       if (key === "r") keysRef.current.r = true;
     };
 
@@ -138,7 +147,11 @@ export default function RaceCanvas({
       if (key === "s" || e.key === "ArrowDown") keysRef.current.s = false;
       if (key === "a" || e.key === "ArrowLeft") keysRef.current.a = false;
       if (key === "d" || e.key === "ArrowRight") keysRef.current.d = false;
-      if (e.key === " ") keysRef.current.space = false;
+      if (e.key === " " || e.code === "Space") {
+        keysRef.current.space = false;
+        stopNitroAudio();
+        setIsBoostingUI(false);
+      }
       if (key === "r") keysRef.current.r = false;
     };
 
@@ -148,6 +161,7 @@ export default function RaceCanvas({
     return () => {
       window.removeEventListener("keydown", handleKeyDown);
       window.removeEventListener("keyup", handleKeyUp);
+      stopNitroAudio();
     };
   }, []);
 
@@ -159,7 +173,7 @@ export default function RaceCanvas({
         x: 0,
         y: 0,
         z: 0,
-        rotationY: Math.PI,
+        rotationY: 0,
         speed: 0,
         driftScore: 0,
         isDrifting: false,
@@ -599,17 +613,22 @@ export default function RaceCanvas({
         wheelObj.name = name;
         wheelObj.position.set(posX, 0.5, posZ);
 
+        // Subgroup for rolling/spinning along the wheel axle (X axis)
+        const rollObj = new THREE.Group();
+        rollObj.name = `${name}_roll`;
+
         // Core tire
         const tire = new THREE.Mesh(outerWheelGeo, tireMat);
         tire.rotation.z = Math.PI / 2;
         tire.castShadow = true;
-        wheelObj.add(tire);
+        rollObj.add(tire);
 
         // Neon rim hubcap
         const rim = new THREE.Mesh(innerRimGeo, neonMat);
         rim.rotation.z = Math.PI / 2;
-        wheelObj.add(rim);
+        rollObj.add(rim);
 
+        wheelObj.add(rollObj);
         return wheelObj;
       }
 
@@ -698,6 +717,55 @@ export default function RaceCanvas({
       exhaustCoreR.position.set(-0.6, 0.35, -3.16);
       carGroup.add(exhaustCoreR);
 
+      // -- 7B. DYNAMIC 3D NITRO FLAME PLUMES (Visible when boosting) --
+      const nitroPlumes = new THREE.Group();
+      nitroPlumes.name = "nitroPlumes";
+      nitroPlumes.visible = false;
+
+      const flameOuterGeo = new THREE.ConeGeometry(0.3, 2.4, 8);
+      flameOuterGeo.translate(0, -1.2, 0); // origin at base attaching to exhaust pipe
+      const flameOuterMat = new THREE.MeshBasicMaterial({
+        color: "#06b6d4", // Electric cyan plasma
+        transparent: true,
+        opacity: 0.85,
+        blending: THREE.AdditiveBlending,
+      });
+
+      const flameInnerGeo = new THREE.ConeGeometry(0.16, 1.8, 8);
+      flameInnerGeo.translate(0, -0.9, 0);
+      const flameInnerMat = new THREE.MeshBasicMaterial({
+        color: "#ffffff", // Superheated white core
+        transparent: true,
+        opacity: 0.95,
+        blending: THREE.AdditiveBlending,
+      });
+
+      // Left exhaust plume
+      const flameL = new THREE.Group();
+      flameL.name = "flameL";
+      flameL.position.set(0.6, 0.35, -3.18);
+      flameL.rotation.x = -Math.PI / 2; // Point backward (-Z)
+      flameL.add(new THREE.Mesh(flameOuterGeo, flameOuterMat));
+      flameL.add(new THREE.Mesh(flameInnerGeo, flameInnerMat));
+      nitroPlumes.add(flameL);
+
+      // Right exhaust plume
+      const flameR = new THREE.Group();
+      flameR.name = "flameR";
+      flameR.position.set(-0.6, 0.35, -3.18);
+      flameR.rotation.x = -Math.PI / 2; // Point backward (-Z)
+      flameR.add(new THREE.Mesh(flameOuterGeo, flameOuterMat));
+      flameR.add(new THREE.Mesh(flameInnerGeo, flameInnerMat));
+      nitroPlumes.add(flameR);
+
+      // Dynamic glowing point light from the nitrous backfire
+      const nitroLight = new THREE.PointLight("#06b6d4", 3.0, 16);
+      nitroLight.name = "nitroLight";
+      nitroLight.position.set(0, 0.4, -3.4);
+      nitroPlumes.add(nitroLight);
+
+      carGroup.add(nitroPlumes);
+
       // -- 8. REAL-TIME VEHICULAR LIGHTING (COLOURED UNDERGLOW SYSTEM) --
       const underglowGeo = new THREE.PlaneGeometry(2.4, 4.4);
       const underglowMat = new THREE.MeshBasicMaterial({
@@ -747,6 +815,35 @@ export default function RaceCanvas({
     const dustPointsMesh = new THREE.Points(particleGeometry, dustMat);
     scene.add(dustPointsMesh);
 
+    // 3D WARP SPEED STREAKS (Hyperspeed lines active when boosting)
+    const warpStreakCount = 80;
+    const warpGeo = new THREE.BufferGeometry();
+    const warpPositions = new Float32Array(warpStreakCount * 6); // 2 vertices per line (start & end)
+    for (let i = 0; i < warpStreakCount; i++) {
+      const angle = Math.random() * Math.PI * 2;
+      const radius = 2.5 + Math.random() * 12;
+      const zOffset = (Math.random() - 0.5) * 45;
+      const x = Math.cos(angle) * radius;
+      const y = 1.2 + Math.sin(angle) * (radius * 0.55);
+
+      const idx = i * 6;
+      warpPositions[idx] = x;
+      warpPositions[idx + 1] = y;
+      warpPositions[idx + 2] = zOffset;
+      warpPositions[idx + 3] = x;
+      warpPositions[idx + 4] = y;
+      warpPositions[idx + 5] = zOffset + 8 + Math.random() * 8; // streak length along forward/backward axis
+    }
+    warpGeo.setAttribute("position", new THREE.BufferAttribute(warpPositions, 3));
+    const warpMat = new THREE.LineBasicMaterial({
+      color: "#38bdf8",
+      transparent: true,
+      opacity: 0,
+      blending: THREE.AdditiveBlending,
+    });
+    const warpLines = new THREE.LineSegments(warpGeo, warpMat);
+    scene.add(warpLines);
+
     function spawnDust(pos: THREE.Vector3, dir: THREE.Vector3, pColor: string = "#9333ea") {
       let spawned = 0;
       for (let p = 0; p < particleCount; p++) {
@@ -781,6 +878,7 @@ export default function RaceCanvas({
     // LOGIC TICK VARIABLES
     let lastTime = performance.now();
     let networkSendTimer = 0;
+    let currentSteerAngle = 0;
 
     const gameLoop = (currentTime: number) => {
       const dt = Math.min((currentTime - lastTime) / 1000, 0.1); // Cap delta time at 100ms
@@ -852,14 +950,14 @@ export default function RaceCanvas({
 
           // Align car rotation toward the road forward tangent so they don't get stuck sideways/backward
           const roadTangent = TRACK_CURVE.getTangentAt(roadCheck.u).normalize();
-          const targetHeading = Math.atan2(-roadTangent.x, -roadTangent.z);
+          const targetHeading = Math.atan2(roadTangent.x, roadTangent.z);
           let angleDiff = targetHeading - pState.rotationY;
           while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
           while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
           pState.rotationY += angleDiff * 0.25; // Smoothened auto-reorientation loop!
 
-          // Keep current speed intact on barrier contact as requested. No speed change on crash.
-          pState.speed = pState.speed;
+          // On each crash into the wall, reduce speed just a bit (dampen speed by 10%, with a lower cap of 18)
+          pState.speed = Math.max(pState.speed * 0.90, 18);
 
           // Cancel active drifts upon boundary crash
           if (pState.isDrifting) {
@@ -879,20 +977,41 @@ export default function RaceCanvas({
           }
         }
 
-        // Speed Boost state
-        if (pState.boostTimer > 0) {
+        // Speed Boost state (Nitro)
+        if (keys.space && activeRoomStatusRef.current === "racing") {
+          pState.boostTimer = Math.max(pState.boostTimer, 0.5); // Hold space to keep nitro active
+        } else if (pState.boostTimer > 0) {
           pState.boostTimer -= dt;
           if (pState.boostTimer <= 0) pState.boostTimer = 0;
         }
 
-        const targetMaxSpeed = pState.boostTimer > 0 ? 95 : 62;
+        const targetMaxSpeed = pState.boostTimer > 0 ? 105 : 62;
 
         // Acceleration physics
         const accelRate = 22.0;
+        const nitroAccelRate = 45.0; // High performance nitro boost!
         const brakeRate = 33.0;
         const frictionRate = 6.0;
 
-        if (keys.w) {
+        if (keys.space) {
+          // Nitro adds direct forward acceleration!
+          if (pState.speed < targetMaxSpeed) {
+            pState.speed += nitroAccelRate * dt;
+          } else {
+            pState.speed -= Math.min(nitroAccelRate * 0.5 * dt, pState.speed - targetMaxSpeed);
+          }
+          
+          // Spawn twin cyan exhaust flame particles for nitro look!
+          if (Math.random() < 0.6) {
+            const rotCos = Math.sin(pState.rotationY);
+            const rotSin = Math.cos(pState.rotationY);
+            // Spawn bright cyan sparks representing hot exhaust backfire in rear
+            const leftExhaust = localPos.clone().add(new THREE.Vector3(-rotCos * 2.8 - 0.6, 0.35, -rotSin * 2.8));
+            const rightExhaust = localPos.clone().add(new THREE.Vector3(-rotCos * 2.8 + 0.6, 0.35, -rotSin * 2.8));
+            spawnDust(leftExhaust, new THREE.Vector3(-rotCos * 4, 0.5 + Math.random() * 1.5, -rotSin * 4), "#06b6d4");
+            spawnDust(rightExhaust, new THREE.Vector3(-rotCos * 4, 0.5 + Math.random() * 1.5, -rotSin * 4), "#06b6d4");
+          }
+        } else if (keys.w) {
           if (pState.speed < targetMaxSpeed) {
             pState.speed += accelRate * dt;
           } else {
@@ -917,29 +1036,26 @@ export default function RaceCanvas({
         const steerSpeed = 1.35;
         const speedRatio = Math.min(Math.abs(pState.speed) / 45, 1.3);
 
+        let targetSteer = 0;
         if (keys.a) {
           pState.rotationY += steerSpeed * speedRatio * dt;
-          const fl = playerCar.getObjectByName("frontLeft") as THREE.Mesh;
-          const fr = playerCar.getObjectByName("frontRight") as THREE.Mesh;
-          if (fl) fl.rotation.y = 0.4;
-          if (fr) fr.rotation.y = 0.4;
+          targetSteer = 0.35;
         } else if (keys.d) {
           pState.rotationY -= steerSpeed * speedRatio * dt;
-          const fl = playerCar.getObjectByName("frontLeft") as THREE.Mesh;
-          const fr = playerCar.getObjectByName("frontRight") as THREE.Mesh;
-          if (fl) fl.rotation.y = -0.4;
-          if (fr) fr.rotation.y = -0.4;
-        } else {
-          const fl = playerCar.getObjectByName("frontLeft") as THREE.Mesh;
-          const fr = playerCar.getObjectByName("frontRight") as THREE.Mesh;
-          if (fl) fl.rotation.y = 0;
-          if (fr) fr.rotation.y = 0;
+          targetSteer = -0.35;
         }
+        currentSteerAngle = THREE.MathUtils.lerp(currentSteerAngle, targetSteer, Math.min(14 * dt, 1));
 
-        // DRIFT MECHANICAL TRIGGERS
+        const fl = playerCar.getObjectByName("frontLeft") as THREE.Group;
+        const fr = playerCar.getObjectByName("frontRight") as THREE.Group;
+        if (fl) fl.rotation.y = currentSteerAngle;
+        if (fr) fr.rotation.y = currentSteerAngle;
+
+        // DRIFT MECHANICAL TRIGGERS - Automatically drift when steering at high speed!
         const canDrift = Math.abs(pState.speed) > 28;
+        const isSteering = keys.a || keys.d;
         
-        if (keys.space && canDrift && (keys.a || keys.d)) {
+        if (canDrift && isSteering) {
           if (!pState.isDrifting) {
             pState.isDrifting = true;
           }
@@ -952,17 +1068,18 @@ export default function RaceCanvas({
           pState.driftScore += scoreDelta;
           pState.driftMeter = Math.min(pState.driftMeter + scoreDelta * 0.4, 100);
 
+          // Drift smoke particles from rear tires
           if (Math.random() < 0.4) {
-            const rotCos = Math.cos(pState.rotationY);
-            const rotSin = Math.sin(pState.rotationY);
-            const exhaustPos = localPos.clone().add(new THREE.Vector3(rotSin * 2.5, 0.4, rotCos * 2.5));
-            spawnDust(exhaustPos, new THREE.Vector3(rotSin * 3, 1.2, rotCos * 3), "#ec4899");
+            const rotCos = Math.sin(pState.rotationY);
+            const rotSin = Math.cos(pState.rotationY);
+            const exhaustPos = localPos.clone().add(new THREE.Vector3(-rotCos * 2.5, 0.4, -rotSin * 2.5));
+            spawnDust(exhaustPos, new THREE.Vector3(-rotCos * 3, 1.2, -rotSin * 3), "#ec4899");
           }
         } else {
           if (pState.isDrifting) {
             pState.isDrifting = false;
 
-            if (pState.driftScore > 120) {
+            if (pState.driftScore > 100) {
               pState.boostTimer = 1.6;
               pState.totalDriftScore += pState.driftScore;
             }
@@ -972,10 +1089,10 @@ export default function RaceCanvas({
           pState.driftAngle = THREE.MathUtils.lerp(pState.driftAngle, 0, 8 * dt);
         }
 
-        // Displacement calculation
+        // Displacement calculation (positive z-forward tracking)
         const driveAngle = pState.rotationY - pState.driftAngle * 0.7;
-        const dx = -Math.sin(driveAngle) * pState.speed * dt;
-        const dz = -Math.cos(driveAngle) * pState.speed * dt;
+        const dx = Math.sin(driveAngle) * pState.speed * dt;
+        const dz = Math.cos(driveAngle) * pState.speed * dt;
 
         pState.x += dx;
         pState.z += dz;
@@ -988,7 +1105,7 @@ export default function RaceCanvas({
           pState.y = checkpointPt.y;
           pState.z = checkpointPt.z;
           const tangent = TRACK_CURVE.getTangentAt(checkU);
-          pState.rotationY = Math.atan2(-tangent.x, -tangent.z);
+          pState.rotationY = Math.atan2(tangent.x, tangent.z);
           pState.speed = 0;
           pState.driftScore = 0;
           pState.driftMeter = 0;
@@ -1029,16 +1146,16 @@ export default function RaceCanvas({
       playerCar.position.set(pState.x, pState.y, pState.z);
       playerCar.rotation.y = pState.rotationY - pState.driftAngle;
 
-      const rearLeft = playerCar.getObjectByName("rearLeft") as THREE.Mesh;
-      const rearRight = playerCar.getObjectByName("rearRight") as THREE.Mesh;
-      const fl = playerCar.getObjectByName("frontLeft") as THREE.Mesh;
-      const fr = playerCar.getObjectByName("frontRight") as THREE.Mesh;
+      const rearLeftRoll = playerCar.getObjectByName("rearLeft_roll") as THREE.Group;
+      const rearRightRoll = playerCar.getObjectByName("rearRight_roll") as THREE.Group;
+      const frontLeftRoll = playerCar.getObjectByName("frontLeft_roll") as THREE.Group;
+      const frontRightRoll = playerCar.getObjectByName("frontRight_roll") as THREE.Group;
 
       const rotationScalar = pState.speed * dt * 0.8;
-      if (rearLeft) rearLeft.rotation.x += rotationScalar;
-      if (rearRight) rearRight.rotation.x += rotationScalar;
-      if (fl) fl.rotation.x += rotationScalar;
-      if (fr) fr.rotation.x += rotationScalar;
+      if (rearLeftRoll) rearLeftRoll.rotation.x += rotationScalar;
+      if (rearRightRoll) rearRightRoll.rotation.x += rotationScalar;
+      if (frontLeftRoll) frontLeftRoll.rotation.x += rotationScalar;
+      if (frontRightRoll) frontRightRoll.rotation.x += rotationScalar;
 
       const brakeL = playerCar.getObjectByName("brakeLightL") as THREE.Mesh;
       const brakeR = playerCar.getObjectByName("brakeLightR") as THREE.Mesh;
@@ -1087,25 +1204,83 @@ export default function RaceCanvas({
         }
       });
 
-      // CAMERA ACTIONS
+      // -- NITROUS EFFECTS SYSTEM --
+      const isBoostingActive = keys.space || pState.boostTimer > 0;
+      const nitroPlumes = playerCar.getObjectByName("nitroPlumes") as THREE.Group;
+      if (nitroPlumes) {
+        if (isBoostingActive) {
+          nitroPlumes.visible = true;
+          const flutterScale = 1.0 + Math.sin(currentTime * 0.06) * 0.3 + (Math.random() - 0.5) * 0.25;
+          const flameL = nitroPlumes.getObjectByName("flameL") as THREE.Group;
+          const flameR = nitroPlumes.getObjectByName("flameR") as THREE.Group;
+          const nLight = nitroPlumes.getObjectByName("nitroLight") as THREE.PointLight;
+          if (flameL) flameL.scale.set(1.0 + (Math.random() - 0.5) * 0.2, flutterScale, 1.0 + (Math.random() - 0.5) * 0.2);
+          if (flameR) flameR.scale.set(1.0 + (Math.random() - 0.5) * 0.2, flutterScale, 1.0 + (Math.random() - 0.5) * 0.2);
+          if (nLight) {
+            nLight.intensity = 2.5 + Math.random() * 2.0;
+          }
+        } else {
+          nitroPlumes.visible = false;
+        }
+      }
+
+      // Stream warp speed streaks
+      if (isBoostingActive && pState.speed > 30) {
+        warpMat.opacity = THREE.MathUtils.lerp(warpMat.opacity, 0.85, 12 * dt);
+        warpLines.position.set(pState.x, pState.y, pState.z);
+        warpLines.rotation.y = pState.rotationY;
+
+        const warpPosAttr = warpGeo.getAttribute("position") as THREE.BufferAttribute;
+        const arr = warpPosAttr.array as Float32Array;
+        const streakSpeed = Math.max(pState.speed * 1.6, 90);
+        for (let i = 0; i < warpStreakCount; i++) {
+          const idx = i * 6;
+          arr[idx + 2] -= streakSpeed * dt;
+          arr[idx + 5] -= streakSpeed * dt;
+          if (arr[idx + 5] < -25) {
+            arr[idx + 2] += 50;
+            arr[idx + 5] += 50;
+          }
+        }
+        warpPosAttr.needsUpdate = true;
+      } else {
+        warpMat.opacity = THREE.MathUtils.lerp(warpMat.opacity, 0, 10 * dt);
+      }
+
+      // CAMERA ACTIONS (Adjusted behind-the-car perspective for correct +Z forward direction)
       const rotCos = Math.sin(pState.rotationY);
       const rotSin = Math.cos(pState.rotationY);
 
-      const targetCamDistance = 16;
-      const targetCamHeight = 5.2;
+      // Camera FOV expansion: Warp tunnel zoom when nitrous spacebar is held!
+      const targetFOV = isBoostingActive ? (keys.space ? 78 : 70) : 60;
+      if (Math.abs(camera.fov - targetFOV) > 0.05) {
+        camera.fov = THREE.MathUtils.lerp(camera.fov, targetFOV, 8 * dt);
+        camera.updateProjectionMatrix();
+      }
 
-      const idealCamX = pState.x + rotCos * targetCamDistance;
+      const targetCamDistance = isBoostingActive ? 17.5 : 16;
+      const targetCamHeight = isBoostingActive ? 4.9 : 5.2;
+
+      const idealCamX = pState.x - rotCos * targetCamDistance;
       const idealCamY = pState.y + targetCamHeight;
-      const idealCamZ = pState.z + rotSin * targetCamDistance;
+      const idealCamZ = pState.z - rotSin * targetCamDistance;
 
       camera.position.x = THREE.MathUtils.lerp(camera.position.x, idealCamX, 6.5 * dt);
       camera.position.y = THREE.MathUtils.lerp(camera.position.y, idealCamY, 6.5 * dt);
       camera.position.z = THREE.MathUtils.lerp(camera.position.z, idealCamZ, 6.5 * dt);
 
+      // Add high-speed camera rumble/vibration when boosting
+      if (isBoostingActive && pState.speed > 40) {
+        const shake = 0.08 * (Math.min(pState.speed, 105) / 105);
+        camera.position.x += (Math.random() - 0.5) * shake;
+        camera.position.y += (Math.random() - 0.5) * shake;
+        camera.position.z += (Math.random() - 0.5) * shake;
+      }
+
       const lookAhead = new THREE.Vector3(
-        pState.x - rotCos * 5,
+        pState.x + rotCos * 5,
         pState.y + 0.5,
-        pState.z - rotSin * 5
+        pState.z + rotSin * 5
       );
       camera.lookAt(lookAhead);
 
@@ -1154,6 +1329,8 @@ export default function RaceCanvas({
       starsMat.dispose();
       particleGeometry.dispose();
       dustMat.dispose();
+      warpGeo.dispose();
+      warpMat.dispose();
 
       // Dispose beacon elements
       beaconBaseGeo.dispose();
@@ -1167,8 +1344,29 @@ export default function RaceCanvas({
   }, [localPlayer.color, localPlayer.id, theme]);
 
   return (
-    <div ref={containerRef} className="relative w-full h-full select-none outline-none">
+    <div ref={containerRef} className="relative w-full h-full select-none outline-none overflow-hidden">
       <canvas ref={canvasRef} className="w-full h-full block" />
+
+      {/* Screen-Space Nitro Burst Radial Vignette & Warp FX */}
+      <div
+        className={`pointer-events-none absolute inset-0 transition-opacity duration-150 ${
+          isBoostingUI ? "opacity-100" : "opacity-0"
+        }`}
+      >
+        {/* Electric cyan peripheral edge glow */}
+        <div className="absolute inset-0 shadow-[inset_0_0_90px_rgba(6,182,212,0.45)]" />
+
+        {/* Dynamic speed-line edge streaks */}
+        <div className="absolute inset-y-0 left-0 w-32 bg-gradient-to-r from-cyan-500/25 to-transparent pointer-events-none animate-pulse" />
+        <div className="absolute inset-y-0 right-0 w-32 bg-gradient-to-l from-cyan-500/25 to-transparent pointer-events-none animate-pulse" />
+
+        {/* Top Nitro Banner Badge */}
+        <div className="absolute top-24 left-1/2 -translate-x-1/2 flex items-center gap-2 px-4 py-1.5 bg-cyan-950/85 border border-cyan-400/80 rounded-full text-cyan-300 font-mono text-xs font-black tracking-widest uppercase shadow-[0_0_20px_rgba(6,182,212,0.6)] animate-bounce backdrop-blur-sm">
+          <span className="text-amber-300">⚡</span>
+          <span>NITRO BOOST ACTIVATED</span>
+          <span className="text-cyan-400 text-[10px]">MAX SPEED</span>
+        </div>
+      </div>
     </div>
   );
 }
