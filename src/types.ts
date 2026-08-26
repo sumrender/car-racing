@@ -56,3 +56,25 @@ export interface BestTime {
   timeMs: number;
   date: string;
 }
+
+export type TrafficVehicleType = "sedan" | "van" | "truck" | "taxi" | "suv";
+
+export interface TrafficVehicle {
+  id: string;
+  type: TrafficVehicleType;
+  name: string;
+  color: string;
+  x: number;
+  y: number;
+  z: number;
+  rotationY: number;
+  speed: number; // km/h
+  u: number; // track spline parameter 0.0 - 1.0
+  lateralOffset: number;
+  targetLateralOffset: number;
+  targetSpeed: number;
+  lane: number;
+  laneChangeTimer: number;
+  length: number;
+  width: number;
+}

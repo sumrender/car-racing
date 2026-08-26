@@ -1,32 +1,26 @@
 import React, { useMemo } from "react";
 import * as THREE from "three";
-import { Player } from "../types";
+import { Player, TrafficVehicle } from "../types";
+import { getSpeedBreakerPositions } from "../utils/speedBreakers";
+import { TRACK_POINTS } from "../constants/track";
 
 interface MinimapProps {
   players: Player[];
   myPlayerId: string | null;
   theme: "light" | "dark";
+  speedBreakersCount?: number;
+  traffic?: TrafficVehicle[];
 }
 
-// Recreate the track points to evaluate identical curve paths for SVG projection
-const TRACK_POINTS = [
-  new THREE.Vector3(0, 0, 0),       // Start/Finish
-  new THREE.Vector3(0, 0, 120),     // Straightaway
-  new THREE.Vector3(40, 0, 220),    // Sweeping Left Turn
-  new THREE.Vector3(120, 0, 280),   // Corner
-  new THREE.Vector3(260, 0, 260),   // S-Curve Entrance
-  new THREE.Vector3(280, 0, 140),   // Hairpin Apex
-  new THREE.Vector3(200, 0, 80),    // Chicane Left
-  new THREE.Vector3(120, 0, -40),   // Chicane Right
-  new THREE.Vector3(0, 0, -80),     // Back Straight
-  new THREE.Vector3(-100, 0, -100), // Outer Hairpin
-  new THREE.Vector3(-140, 0, -20),  // Exit turn
-  new THREE.Vector3(-60, 0, 20),    // Final chicane
-];
-
-export default function Minimap({ players, myPlayerId, theme }: MinimapProps) {
+export default function Minimap({
+  players,
+  myPlayerId,
+  theme,
+  speedBreakersCount = 0,
+  traffic = [],
+}: MinimapProps) {
   // Generate highly-precise curved polyline points using CatmullRomCurve3
-  const { pathData, checkpoints } = useMemo(() => {
+  const { pathData, checkpoints, speedBreakerBlips } = useMemo(() => {
     const curve = new THREE.CatmullRomCurve3(TRACK_POINTS, true);
     
     // Evaluate 150 points for an ultra-smooth outline
@@ -47,8 +41,28 @@ export default function Minimap({ players, myPlayerId, theme }: MinimapProps) {
       });
     }
 
-    return { pathData: dStr, checkpoints: cps };
-  }, []);
+    // Speed breakers markers
+    const sBPositions = getSpeedBreakerPositions(speedBreakersCount);
+    const sbBlips = sBPositions.map((u, i) => {
+      const pt = curve.getPointAt(u);
+      const tangent = curve.getTangentAt(u).normalize();
+      const normal = new THREE.Vector3(-tangent.z, 0, tangent.x).normalize();
+      const halfW = 10;
+      const p1 = pt.clone().add(normal.clone().multiplyScalar(halfW));
+      const p2 = pt.clone().sub(normal.clone().multiplyScalar(halfW));
+      return {
+        id: i,
+        x1: p1.x,
+        z1: p1.z,
+        x2: p2.x,
+        z2: p2.z,
+        cx: pt.x,
+        cz: pt.z,
+      };
+    });
+
+    return { pathData: dStr, checkpoints: cps, speedBreakerBlips: sbBlips };
+  }, [speedBreakersCount]);
 
   // Track bounding box mapping coordinates
   // Range: x: [-140, 280] + padding -> viewBox [-165, -125, 470, 435]
@@ -105,6 +119,28 @@ export default function Minimap({ players, myPlayerId, theme }: MinimapProps) {
           filter={theme === "dark" ? "url(#minimap-glow)" : undefined}
         />
 
+        {/* Speed Breaker Hazard Crossbars */}
+        {speedBreakerBlips.map((sb) => (
+          <g key={`sb-${sb.id}`}>
+            <line
+              x1={sb.x1}
+              y1={sb.z1}
+              x2={sb.x2}
+              y2={sb.z2}
+              stroke="#f59e0b"
+              strokeWidth="4.5"
+              strokeLinecap="round"
+              opacity="0.9"
+            />
+            <circle
+              cx={sb.cx}
+              cy={sb.cz}
+              r="2"
+              fill="#fbbf24"
+            />
+          </g>
+        ))}
+
         {/* Checkpoint Indicators */}
         {checkpoints.map((cp) => (
           <g key={cp.index}>
@@ -129,6 +165,36 @@ export default function Minimap({ players, myPlayerId, theme }: MinimapProps) {
             </text>
           </g>
         ))}
+
+        {/* Traffic Vehicle Blips */}
+        {traffic.map((tv) => {
+          const tx = tv.x || 0;
+          const tz = tv.z || 0;
+          const trotY = tv.rotationY || 0;
+          return (
+            <g
+              key={tv.id}
+              transform={`translate(${tx}, ${tz}) rotate(${(-trotY * 180) / Math.PI})`}
+              className="transition-all duration-75"
+            >
+              {/* Traffic vehicle body rectangle */}
+              <rect
+                x="-4"
+                y="-7"
+                width="8"
+                height="14"
+                rx="2"
+                fill={tv.color}
+                stroke={theme === "dark" ? "#ffffff" : "#0f172a"}
+                strokeWidth="1.2"
+                opacity="0.9"
+              />
+              {/* Headlights indicator */}
+              <circle cx="-2" cy="7" r="1" fill="#fef08a" />
+              <circle cx="2" cy="7" r="1" fill="#fef08a" />
+            </g>
+          );
+        })}
 
         {/* Player Blips */}
         {players.map((p) => {

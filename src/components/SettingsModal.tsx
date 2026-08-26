@@ -1,4 +1,4 @@
-import { RotateCcw, LogOut, Sun, Moon, Play, X, Settings2 } from "lucide-react";
+import { RotateCcw, LogOut, Sun, Moon, Play, X, Settings2, AlertTriangle, Car } from "lucide-react";
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -8,6 +8,10 @@ interface SettingsModalProps {
   theme: "light" | "dark";
   onToggleTheme: () => void;
   isMultiplayer?: boolean;
+  speedBreakersCount?: number;
+  onSpeedBreakersChange?: (count: number) => void;
+  trafficCount?: number;
+  onTrafficCountChange?: (count: number) => void;
 }
 
 export default function SettingsModal({
@@ -18,6 +22,10 @@ export default function SettingsModal({
   theme,
   onToggleTheme,
   isMultiplayer = false,
+  speedBreakersCount,
+  onSpeedBreakersChange,
+  trafficCount,
+  onTrafficCountChange,
 }: SettingsModalProps) {
   if (!isOpen) return null;
 
@@ -145,6 +153,106 @@ export default function SettingsModal({
               />
             </button>
           </div>
+
+          {/* Speed Breakers Configurator in Settings Modal (Single Player) */}
+          {speedBreakersCount !== undefined && onSpeedBreakersChange && (
+            <div
+              id="settings-speed-breakers-card"
+              className={`w-full py-3 px-4 rounded-xl border flex flex-col gap-2 transition-colors ${
+                theme === "dark"
+                  ? "bg-slate-800/50 border-slate-700/70"
+                  : "bg-slate-50 border-slate-200"
+              }`}
+            >
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2.5">
+                  <div className="p-1.5 rounded-lg bg-amber-400/10 text-amber-400">
+                    <AlertTriangle className="w-4 h-4" />
+                  </div>
+                  <div className="text-left">
+                    <div className="font-mono text-xs font-bold">Speed Breakers</div>
+                    <div className="text-[10px] font-sans text-slate-400">
+                      {speedBreakersCount > 0
+                        ? `${speedBreakersCount} ramp jumps enabled`
+                        : "Disabled (smooth road)"}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-1.5 font-mono">
+                  <button
+                    type="button"
+                    onClick={() => onSpeedBreakersChange(Math.max(0, speedBreakersCount - 1))}
+                    disabled={speedBreakersCount <= 0}
+                    className="w-7 h-7 rounded-lg bg-slate-700 hover:bg-slate-600 disabled:opacity-30 text-white font-bold text-xs flex items-center justify-center transition"
+                  >
+                    -
+                  </button>
+                  <span className="w-6 text-center font-bold text-amber-400 text-xs">
+                    {speedBreakersCount}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => onSpeedBreakersChange(Math.min(10, speedBreakersCount + 1))}
+                    disabled={speedBreakersCount >= 10}
+                    className="w-7 h-7 rounded-lg bg-slate-700 hover:bg-slate-600 disabled:opacity-30 text-white font-bold text-xs flex items-center justify-center transition"
+                  >
+                    +
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Traffic Density Configurator in Settings Modal (Single Player) */}
+          {trafficCount !== undefined && onTrafficCountChange && (
+            <div
+              id="settings-traffic-card"
+              className={`w-full py-3 px-4 rounded-xl border flex flex-col gap-2 transition-colors ${
+                theme === "dark"
+                  ? "bg-slate-800/50 border-slate-700/70"
+                  : "bg-slate-50 border-slate-200"
+              }`}
+            >
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2.5">
+                  <div className="p-1.5 rounded-lg bg-cyan-400/10 text-cyan-400">
+                    <Car className="w-4 h-4" />
+                  </div>
+                  <div className="text-left">
+                    <div className="font-mono text-xs font-bold">Highway Traffic</div>
+                    <div className="text-[10px] font-sans text-slate-400">
+                      {trafficCount > 0
+                        ? `${trafficCount} civilian vehicles cruising`
+                        : "No traffic (clear track)"}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-1.5 font-mono">
+                  <button
+                    type="button"
+                    onClick={() => onTrafficCountChange(Math.max(0, trafficCount - 1))}
+                    disabled={trafficCount <= 0}
+                    className="w-7 h-7 rounded-lg bg-slate-700 hover:bg-slate-600 disabled:opacity-30 text-white font-bold text-xs flex items-center justify-center transition"
+                  >
+                    -
+                  </button>
+                  <span className="w-6 text-center font-bold text-cyan-400 text-xs">
+                    {trafficCount}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => onTrafficCountChange(Math.min(20, trafficCount + 1))}
+                    disabled={trafficCount >= 20}
+                    className="w-7 h-7 rounded-lg bg-slate-700 hover:bg-slate-600 disabled:opacity-30 text-white font-bold text-xs flex items-center justify-center transition"
+                  >
+                    +
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Exit Game button */}
           <button

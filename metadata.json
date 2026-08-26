@@ -1,6 +1,6 @@
 {
   "name": "Multiplayer Racing Game",
-  "description": "A high-octane 3D racing game featuring multiplayer lobby sync and single-player mode with configurable AI opponents (1 to 5 rivals across 5 difficulty tiers), real-time minimap tracking, drift mechanics, and podium leaderboards.",
+  "description": "A high-octane 3D racing game featuring multiplayer lobby sync and single-player mode with configurable AI opponents (1-5 rivals), configurable traffic density with realistic civilian vehicles, dynamic multi-car physical collision resolution, configurable track speed breakers with airborne ramp jumps and suspension physics, real-time minimap tracking, drift mechanics, and podium leaderboards.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

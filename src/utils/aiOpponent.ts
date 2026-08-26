@@ -453,11 +453,15 @@ export function updateAISimulation(
     .clone()
     .add(trackNormal.clone().multiplyScalar(aiState.lateralOffset));
   p.x = actualPos.x;
-  p.y = 0;
+  // Preserve vertical height (p.y) for jump and ramp mechanics
   p.z = actualPos.z;
 
-  const heading = Math.atan2(trackTangent.x, trackTangent.z);
-  p.rotationY = heading;
+  const targetHeading = Math.atan2(trackTangent.x, trackTangent.z);
+  // Smooth realistic steering orientation rather than instant snap
+  let angleDiff = targetHeading - p.rotationY;
+  while (angleDiff < -Math.PI) angleDiff += Math.PI * 2;
+  while (angleDiff > Math.PI) angleDiff -= Math.PI * 2;
+  p.rotationY += angleDiff * Math.min(12 * dt, 1);
   p.speed = aiState.currentSpeed;
 
   // 8. CHECKPOINTS & LAP LOGIC
