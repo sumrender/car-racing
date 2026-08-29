@@ -138,7 +138,7 @@ export default function RaceCanvas({
 
   // AI Opponents simulation state ref (supports 1 to 5 rivals)
   const aiPackStateRef = useRef<AIState[]>(
-    createAIPackState(aiCount, aiDifficulty)
+    createAIPackState(aiCount, aiDifficulty, activeTrack.curve)
   );
 
   useEffect(() => {
@@ -160,7 +160,11 @@ export default function RaceCanvas({
   useEffect(() => {
     activeRoomStatusRef.current = activeRoomStatus;
     if (activeRoomStatus === "countdown" || activeRoomStatus === "lobby") {
-      aiPackStateRef.current = createAIPackState(aiCount, aiDifficulty);
+      aiPackStateRef.current = createAIPackState(
+        aiCount,
+        aiDifficulty,
+        activeTrack.curve
+      );
       if (isSinglePlayer && trafficCountRef.current > 0) {
         trafficVehiclesRef.current = generateTrafficVehicles(
           trafficCountRef.current,
@@ -250,6 +254,9 @@ export default function RaceCanvas({
     scene.add(trackComponents.curbRightMesh);
     scene.add(trackComponents.leftLaserFence);
     scene.add(trackComponents.rightLaserFence);
+    if (trackComponents.startGridGroup) {
+      scene.add(trackComponents.startGridGroup);
+    }
     trackComponents.checkpointBeacons.forEach((beacon) => scene.add(beacon));
 
     // SPEED BREAKERS TRACK OBJECTS

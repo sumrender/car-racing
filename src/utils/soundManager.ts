@@ -79,21 +79,22 @@ type SoundAssetKey =
   | "chime";
 
 const SOUND_ASSET_PATHS: Record<SoundAssetKey, string> = {
-  engine_idle: "/sounds/engine_idle.wav",
-  engine_high: "/sounds/engine_high.wav",
-  nitro: "/sounds/nitro.wav",
-  crash: "/sounds/crash.wav",
-  drift: "/sounds/drift.wav",
-  wall_scrape: "/sounds/wall_scrape.wav",
-  gear_shift: "/sounds/gear_shift.wav",
-  landing: "/sounds/landing.wav",
-  wind_whoosh: "/sounds/wind_whoosh.wav",
-  chime: "/sounds/chime.wav",
+  engine_idle: "/sounds/engine_idle.wav?v=mw",
+  engine_high: "/sounds/engine_high.wav?v=mw",
+  nitro: "/sounds/nitro.wav?v=mw",
+  crash: "/sounds/crash.wav?v=mw",
+  drift: "/sounds/drift.wav?v=mw",
+  wall_scrape: "/sounds/wall_scrape.wav?v=mw",
+  gear_shift: "/sounds/gear_shift.wav?v=mw",
+  landing: "/sounds/landing.wav?v=mw",
+  wind_whoosh: "/sounds/wind_whoosh.wav?v=mw",
+  chime: "/sounds/chime.wav?v=mw",
 };
 
 /**
- * High-Fidelity Hybrid Sampled & Synthesized Audio Engine.
- * Loads studio-grade sampled audio files with seamless looping and dynamic pitch/RPM modulation.
+ * Need For Speed: Most Wanted Hybrid Sampled & Synthesized Audio Engine.
+ * Features the signature BMW M3 GTR straight-cut transmission whine, screaming high-RPM induction roar,
+ * blow-off valve turbo flutter, 2-step anti-lag exhaust pops, and supersonic nitrous purge dynamics.
  */
 export class WebAudioSoundManager implements ISoundManager {
   private audioCtx: AudioContext | null = null;
@@ -116,7 +117,16 @@ export class WebAudioSoundManager implements ISoundManager {
   private lastGear: number = 1;
   private isEngineRunning: boolean = false;
 
-  // 2. NITRO LOOPERS
+  // 1.1 NFS MW SIGNATURE STRAIGHT-CUT GEARBOX WHINE SYNTHESIZER
+  private gearWhineOsc: OscillatorNode | null = null;
+  private gearWhineFilter: BiquadFilterNode | null = null;
+  private gearWhineGain: GainNode | null = null;
+
+  // 1.2 TURBOCHARGER COMPRESSOR SPOOL SYNTHESIZER
+  private turboWhistleOsc: OscillatorNode | null = null;
+  private turboWhistleGain: GainNode | null = null;
+
+  // 2. NITRO LOOPERS & PURGE
   private nitroLoopSource: AudioBufferSourceNode | null = null;
   private nitroMasterGain: GainNode | null = null;
   private isNitroActive: boolean = false;
@@ -138,6 +148,9 @@ export class WebAudioSoundManager implements ISoundManager {
   private lastLandingSoundTime = 0;
   private lastRumbleTime = 0;
   private lastGearShiftSoundTime = 0;
+  private wasAccelerating: boolean = false;
+  private lastBovTime: number = 0;
+  private lastPopTime: number = 0;
 
   // Configuration
   private config: AudioConfig;
@@ -371,7 +384,7 @@ export class WebAudioSoundManager implements ISoundManager {
       this.engineFilter = ctx.createBiquadFilter();
       this.engineFilter.type = "lowpass";
       this.engineFilter.frequency.setValueAtTime(1400, now);
-      this.engineFilter.Q.setValueAtTime(1.5, now);
+      this.engineFilter.Q.setValueAtTime(1.8, now);
 
       this.engineIdleGain = ctx.createGain();
       this.engineIdleGain.gain.setValueAtTime(0.7, now);
@@ -387,6 +400,51 @@ export class WebAudioSoundManager implements ISoundManager {
       this.isEngineRunning = true;
     } catch (e) {
       console.warn("Continuous engine generator setup:", e);
+    }
+
+    // --- 1.1 NFS MW BMW M3 GTR SIGNATURE STRAIGHT-CUT GEARBOX WHINE ---
+    try {
+      const gearOsc = ctx.createOscillator();
+      gearOsc.type = "sawtooth";
+      gearOsc.frequency.setValueAtTime(500, now);
+
+      const gearFilter = ctx.createBiquadFilter();
+      gearFilter.type = "bandpass";
+      gearFilter.frequency.setValueAtTime(1450, now);
+      gearFilter.Q.setValueAtTime(4.5, now);
+
+      const gearGain = ctx.createGain();
+      gearGain.gain.setValueAtTime(0.0001, now);
+
+      gearOsc.connect(gearFilter);
+      gearFilter.connect(gearGain);
+      gearGain.connect(this.engineGain);
+      gearOsc.start(now);
+
+      this.gearWhineOsc = gearOsc;
+      this.gearWhineFilter = gearFilter;
+      this.gearWhineGain = gearGain;
+    } catch (e) {
+      console.warn("Straight-cut gear whine init error:", e);
+    }
+
+    // --- 1.2 TURBOCHARGER COMPRESSOR SPOOL WHISTLE ---
+    try {
+      const turboOsc = ctx.createOscillator();
+      turboOsc.type = "sine";
+      turboOsc.frequency.setValueAtTime(2400, now);
+
+      const turboGain = ctx.createGain();
+      turboGain.gain.setValueAtTime(0.0001, now);
+
+      turboOsc.connect(turboGain);
+      turboGain.connect(this.engineGain);
+      turboOsc.start(now);
+
+      this.turboWhistleOsc = turboOsc;
+      this.turboWhistleGain = turboGain;
+    } catch (e) {
+      console.warn("Turbo whistle init error:", e);
     }
 
     // --- 2. DRIFT TIRE SCREECH GENERATOR ---
@@ -421,6 +479,17 @@ export class WebAudioSoundManager implements ISoundManager {
 
   public dispose() {
     this.stopNitro();
+    try {
+      if (this.gearWhineOsc) {
+        this.gearWhineOsc.stop();
+        this.gearWhineOsc.disconnect();
+      }
+      if (this.turboWhistleOsc) {
+        this.turboWhistleOsc.stop();
+        this.turboWhistleOsc.disconnect();
+      }
+    } catch {}
+
     if (this.audioCtx && this.audioCtx.state !== "closed") {
       this.audioCtx.close().catch(() => {});
     }
@@ -431,6 +500,11 @@ export class WebAudioSoundManager implements ISoundManager {
     this.engineMasterGainNode = null;
     this.engineIdleSource = null;
     this.engineHighSource = null;
+    this.gearWhineOsc = null;
+    this.gearWhineFilter = null;
+    this.gearWhineGain = null;
+    this.turboWhistleOsc = null;
+    this.turboWhistleGain = null;
     this.driftLoopSource = null;
     this.windLoopSource = null;
     this.isGraphInitialized = false;
@@ -572,13 +646,22 @@ export class WebAudioSoundManager implements ISoundManager {
     }
 
     const absSpeed = Math.abs(speed);
+    const isReversing = speed < -0.5;
+
+    // Distinguish throttle from braking based on motion direction
+    const isThrottle = isAccelerating || (isReversing && isBraking);
+    const isRealBrake = (speed > 0.5 && isBraking) || (isReversing && isAccelerating);
 
     // Calculate gear ratios
     let gear = 1;
     let gearMin = 0;
     let gearMax = 28;
 
-    if (absSpeed < 28) {
+    if (isReversing) {
+      gear = 1;
+      gearMin = 0;
+      gearMax = 32;
+    } else if (absSpeed < 28) {
       gear = 1;
       gearMin = 0;
       gearMax = 28;
@@ -601,20 +684,20 @@ export class WebAudioSoundManager implements ISoundManager {
     }
 
     // Play subtle gear shift sound when gear changes under load
-    if (gear !== this.lastGear && isAccelerating && now - this.lastGearShiftSoundTime > 0.4) {
+    if (gear !== this.lastGear && isThrottle && now - this.lastGearShiftSoundTime > 0.4) {
       this.lastGearShiftSoundTime = now;
-      this.playSampledSound("gear_shift", 0.45);
+      this.playSampledSound("gear_shift", 0.65);
     }
     this.lastGear = gear;
 
     const gearRatio = Math.max(0, Math.min(1, (absSpeed - gearMin) / (gearMax - gearMin)));
-    let targetRPM = 1000 + gearRatio * 4500 + (gear - 1) * 200;
+    let targetRPM = 1000 + gearRatio * 4600 + (gear - 1) * 220;
 
-    if (isAccelerating) targetRPM += 900;
-    if (isNitro) targetRPM += 1600;
-    if (isBraking) targetRPM = Math.max(900, targetRPM - 600);
+    if (isThrottle) targetRPM += 950;
+    if (isNitro) targetRPM += 1700;
+    if (isRealBrake) targetRPM = Math.max(900, targetRPM - 650);
 
-    const smoothing = isAccelerating || isNitro ? 12 : 7;
+    const smoothing = isThrottle || isNitro ? 12 : 7;
     this.currentRPM += (targetRPM - this.currentRPM) * Math.min(1, smoothing * Math.max(dt, 0.016));
 
     // Calculate pitch playbackRates
@@ -626,15 +709,15 @@ export class WebAudioSoundManager implements ISoundManager {
     const highMix = Math.min(1.0, Math.max(0, (this.currentRPM - 1800) / 3200));
     const idleMix = Math.max(0.1, 1.0 - highMix * 0.9);
 
-    let filterFreq = 1200 + rpmNorm * 3200;
-    if (isAccelerating) filterFreq += 800;
-    if (isNitro) filterFreq += 1400;
+    let filterFreq = 1200 + rpmNorm * 3400;
+    if (isThrottle) filterFreq += 900;
+    if (isNitro) filterFreq += 1600;
 
     let targetMasterGain = 0.45;
-    if (isAccelerating) targetMasterGain = 0.75;
-    if (isNitro) targetMasterGain = 0.9;
-    if (isBraking) targetMasterGain = 0.35;
-    if (absSpeed < 2 && !isAccelerating) targetMasterGain = 0.4;
+    if (isThrottle) targetMasterGain = 0.78;
+    if (isNitro) targetMasterGain = 0.95;
+    if (isRealBrake) targetMasterGain = 0.35;
+    if (absSpeed < 2 && !isThrottle) targetMasterGain = 0.4;
 
     try {
       if (this.engineIdleSource) {
@@ -652,6 +735,125 @@ export class WebAudioSoundManager implements ISoundManager {
       this.engineMasterGainNode.gain.cancelScheduledValues(now);
       this.engineMasterGainNode.gain.setValueAtTime(this.engineMasterGainNode.gain.value, now);
       this.engineMasterGainNode.gain.linearRampToValueAtTime(targetMasterGain, now + 0.04);
+
+      // --- REALTIME STRAIGHT-CUT TRANSMISSION GEARBOX WHINE MODULATION ---
+      if (this.gearWhineOsc && this.gearWhineFilter && this.gearWhineGain) {
+        // High-pitched teeth-meshing whine proportional to speed and current gear
+        const whineFreq = 550 + absSpeed * 28 + (this.currentRPM / 6500) * 900;
+        const whineTargetGain = isAccelerating
+          ? Math.min(0.24, (absSpeed / 85) * 0.22 + 0.03)
+          : Math.min(0.09, (absSpeed / 85) * 0.09);
+
+        this.gearWhineOsc.frequency.setValueAtTime(whineFreq, now);
+        this.gearWhineFilter.frequency.setValueAtTime(whineFreq, now);
+        this.gearWhineGain.gain.cancelScheduledValues(now);
+        this.gearWhineGain.gain.setValueAtTime(this.gearWhineGain.gain.value, now);
+        this.gearWhineGain.gain.linearRampToValueAtTime(whineTargetGain, now + 0.04);
+      }
+
+      // --- REALTIME TURBOCHARGER COMPRESSOR SPOOL MODULATION ---
+      if (this.turboWhistleOsc && this.turboWhistleGain) {
+        const turboFreq = 2200 + (this.currentRPM / 6500) * 2400 + (isNitro ? 900 : 0);
+        const turboTargetGain = isAccelerating ? (isNitro ? 0.16 : 0.10) : 0.0001;
+
+        this.turboWhistleOsc.frequency.setValueAtTime(turboFreq, now);
+        this.turboWhistleGain.gain.cancelScheduledValues(now);
+        this.turboWhistleGain.gain.setValueAtTime(this.turboWhistleGain.gain.value, now);
+        this.turboWhistleGain.gain.linearRampToValueAtTime(turboTargetGain, now + 0.05);
+      }
+
+      // --- THROTTLE LIFT-OFF BLOW-OFF VALVE (BOV) / COMPRESSOR SURGE ---
+      if (this.wasAccelerating && !isAccelerating && this.currentRPM > 3300 && now - this.lastBovTime > 0.45) {
+        this.lastBovTime = now;
+        this.playBlowOffValve(this.currentRPM);
+      }
+      this.wasAccelerating = isAccelerating;
+
+      // --- HIGH-RPM DECELERATION EXHAUST CRACKLES / BURBLE ---
+      if (!isAccelerating && this.currentRPM > 4200 && now - this.lastPopTime > 0.22 && Math.random() > 0.5) {
+        this.lastPopTime = now;
+        this.playExhaustPop(0.35);
+      }
+    } catch {}
+  }
+
+  /**
+   * Procedural & sampled Turbo Blow-Off Valve (BOV) / Compressor Surge Flutter.
+   */
+  public playBlowOffValve(rpm: number = 5000) {
+    const ctx = this.getAudioContext();
+    if (!ctx) return;
+    const now = ctx.currentTime;
+
+    // Trigger sampled gear shift / flutter
+    this.playSampledSound("gear_shift", 0.55, 0.08, this.sfxGain);
+
+    // Complementary procedural resonant flutter
+    try {
+      const flutterOsc = ctx.createOscillator();
+      const flutterGain = ctx.createGain();
+      const flutterFilter = ctx.createBiquadFilter();
+
+      flutterOsc.type = "sine";
+      flutterOsc.frequency.setValueAtTime(3200 + (rpm / 6500) * 800, now);
+
+      flutterFilter.type = "bandpass";
+      flutterFilter.frequency.setValueAtTime(3400, now);
+      flutterFilter.Q.setValueAtTime(5.0, now);
+
+      flutterGain.gain.setValueAtTime(0.2, now);
+      flutterGain.gain.exponentialRampToValueAtTime(0.001, now + 0.35);
+
+      flutterOsc.connect(flutterFilter);
+      flutterFilter.connect(flutterGain);
+      flutterGain.connect(this.sfxGain || ctx.destination);
+
+      flutterOsc.start(now);
+      flutterOsc.stop(now + 0.38);
+    } catch {}
+  }
+
+  /**
+   * Procedural 2-Step Anti-Lag Gunshot Exhaust Pop / Backfire.
+   */
+  public playExhaustPop(intensity: number = 0.5) {
+    const ctx = this.getAudioContext();
+    if (!ctx) return;
+    const now = ctx.currentTime;
+
+    try {
+      // Sub boom
+      const subOsc = ctx.createOscillator();
+      const subGain = ctx.createGain();
+      subOsc.type = "triangle";
+      subOsc.frequency.setValueAtTime(95, now);
+      subOsc.frequency.exponentialRampToValueAtTime(35, now + 0.12);
+
+      subGain.gain.setValueAtTime(0.6 * intensity, now);
+      subGain.gain.exponentialRampToValueAtTime(0.001, now + 0.14);
+
+      subOsc.connect(subGain);
+      subGain.connect(this.engineGain || ctx.destination);
+
+      subOsc.start(now);
+      subOsc.stop(now + 0.15);
+
+      // Gunshot crackle burst (white noise burst)
+      const bufferSize = Math.floor(ctx.sampleRate * 0.09);
+      const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+      const data = buffer.getChannelData(0);
+      for (let i = 0; i < bufferSize; i++) {
+        data[i] = (Math.random() * 2 - 1) * Math.exp(-(i / bufferSize) * 8);
+      }
+
+      const noiseSrc = ctx.createBufferSource();
+      noiseSrc.buffer = buffer;
+      const noiseGain = ctx.createGain();
+      noiseGain.gain.setValueAtTime(0.7 * intensity, now);
+
+      noiseSrc.connect(noiseGain);
+      noiseGain.connect(this.engineGain || ctx.destination);
+      noiseSrc.start(now);
     } catch {}
   }
 
@@ -767,7 +969,7 @@ export class WebAudioSoundManager implements ISoundManager {
       // Master Nitro Gain
       const masterNitro = ctx.createGain();
       masterNitro.gain.setValueAtTime(0.01, now);
-      masterNitro.gain.linearRampToValueAtTime(0.95, now + 0.05);
+      masterNitro.gain.linearRampToValueAtTime(1.0, now + 0.04);
       masterNitro.connect(this.engineGain);
       this.nitroMasterGain = masterNitro;
 
@@ -782,8 +984,22 @@ export class WebAudioSoundManager implements ISoundManager {
         this.nitroLoopSource = loopSrc;
       }
 
-      // Initial spool pop
-      this.playSampledSound("gear_shift", 0.6, 0.05, this.engineGain);
+      // Procedural Sub-Bass Punch on Nitrous Engagement
+      const subOsc = ctx.createOscillator();
+      const subGain = ctx.createGain();
+      subOsc.type = "sine";
+      subOsc.frequency.setValueAtTime(80, now);
+      subOsc.frequency.exponentialRampToValueAtTime(32, now + 0.22);
+      subGain.gain.setValueAtTime(0.85, now);
+      subGain.gain.exponentialRampToValueAtTime(0.001, now + 0.24);
+
+      subOsc.connect(subGain);
+      subGain.connect(this.engineGain);
+      subOsc.start(now);
+      subOsc.stop(now + 0.25);
+
+      // Initial purge spool pop
+      this.playSampledSound("gear_shift", 0.75, 0.05, this.engineGain);
     } catch (e) {
       console.warn("Nitro start sound:", e);
     }
@@ -806,7 +1022,10 @@ export class WebAudioSoundManager implements ISoundManager {
       const now = ctx.currentTime;
       currentMaster.gain.cancelScheduledValues(now);
       currentMaster.gain.setValueAtTime(currentMaster.gain.value, now);
-      currentMaster.gain.linearRampToValueAtTime(0.0001, now + 0.1);
+      currentMaster.gain.linearRampToValueAtTime(0.0001, now + 0.12);
+
+      // Solenoid cutoff blow-off puff
+      this.playBlowOffValve(4500);
 
       setTimeout(() => {
         try {
@@ -816,7 +1035,7 @@ export class WebAudioSoundManager implements ISoundManager {
           }
           currentMaster.disconnect();
         } catch {}
-      }, 120);
+      }, 140);
     } catch {}
   }
 

@@ -122,9 +122,9 @@ export const AI_RIVAL_PRESETS: AIRivalPreset[] = [
     color: "#ef4444",
     title: "Pack Leader",
     gridSlot: 2,
-    initialLateralOffset: 3.5,
-    initialZOffset: -3.5,
-    initialUOffset: 0.0,
+    initialLateralOffset: 3.4,
+    initialZOffset: -8.0,
+    initialUOffset: -0.007,
     speedVariance: 1.02,
     lateralLineBias: 0.0,
   },
@@ -133,9 +133,9 @@ export const AI_RIVAL_PRESETS: AIRivalPreset[] = [
     color: "#10b981",
     title: "Cornering Specialist",
     gridSlot: 3,
-    initialLateralOffset: -3.5,
-    initialZOffset: -7.0,
-    initialUOffset: -0.005,
+    initialLateralOffset: -3.4,
+    initialZOffset: -15.0,
+    initialUOffset: -0.014,
     speedVariance: 0.99,
     lateralLineBias: -0.8,
   },
@@ -144,9 +144,9 @@ export const AI_RIVAL_PRESETS: AIRivalPreset[] = [
     color: "#8b5cf6",
     title: "Speed Demon",
     gridSlot: 4,
-    initialLateralOffset: 3.0,
-    initialZOffset: -10.5,
-    initialUOffset: -0.010,
+    initialLateralOffset: 3.4,
+    initialZOffset: -22.0,
+    initialUOffset: -0.021,
     speedVariance: 1.01,
     lateralLineBias: 0.8,
   },
@@ -155,9 +155,9 @@ export const AI_RIVAL_PRESETS: AIRivalPreset[] = [
     color: "#06b6d4",
     title: "Grip Technician",
     gridSlot: 5,
-    initialLateralOffset: -3.0,
-    initialZOffset: -14.0,
-    initialUOffset: -0.015,
+    initialLateralOffset: -3.4,
+    initialZOffset: -29.0,
+    initialUOffset: -0.028,
     speedVariance: 0.98,
     lateralLineBias: -0.5,
   },
@@ -166,9 +166,9 @@ export const AI_RIVAL_PRESETS: AIRivalPreset[] = [
     color: "#f59e0b",
     title: "Aggressive Chaser",
     gridSlot: 6,
-    initialLateralOffset: 2.2,
-    initialZOffset: -17.5,
-    initialUOffset: -0.020,
+    initialLateralOffset: 2.8,
+    initialZOffset: -36.0,
+    initialUOffset: -0.035,
     speedVariance: 1.00,
     lateralLineBias: 0.5,
   },
@@ -193,11 +193,31 @@ export function createInitialAIState(
   difficulty: AIDifficulty = "medium",
   name = "Apex AI",
   color = "#ef4444",
-  rivalIndex = 0
+  rivalIndex = 0,
+  trackCurve?: THREE.CatmullRomCurve3
 ): AIState {
   const preset = AI_RIVAL_PRESETS[rivalIndex % AI_RIVAL_PRESETS.length];
   const finalName = name || preset.name;
   const finalColor = color || preset.color;
+
+  let posX = preset.initialLateralOffset;
+  let posY = 0;
+  let posZ = preset.initialZOffset;
+  let rotY = 0;
+
+  if (trackCurve) {
+    const startPt = trackCurve.getPointAt(0);
+    const tangent = trackCurve.getTangentAt(0).normalize();
+    const normal = new THREE.Vector3(-tangent.z, 0, tangent.x);
+    const gridPos = startPt
+      .clone()
+      .add(normal.clone().multiplyScalar(preset.initialLateralOffset))
+      .add(tangent.clone().multiplyScalar(preset.initialZOffset));
+    posX = gridPos.x;
+    posY = gridPos.y;
+    posZ = gridPos.z;
+    rotY = Math.atan2(tangent.x, tangent.z);
+  }
 
   return {
     player: {
@@ -206,10 +226,10 @@ export function createInitialAIState(
       color: finalColor,
       isHost: false,
       ready: true,
-      x: preset.initialLateralOffset,
-      y: 0,
-      z: preset.initialZOffset,
-      rotationY: 0,
+      x: posX,
+      y: posY,
+      z: posZ,
+      rotationY: rotY,
       speed: 0,
       driftScore: 0,
       isDrifting: false,
@@ -237,13 +257,22 @@ export function createInitialAIState(
 
 export function createAIPackState(
   count: number = 1,
-  difficulty: AIDifficulty = "medium"
+  difficulty: AIDifficulty = "medium",
+  trackCurve?: THREE.CatmullRomCurve3
 ): AIState[] {
   const safeCount = Math.max(1, Math.min(5, count));
   const pack: AIState[] = [];
   for (let i = 0; i < safeCount; i++) {
     const preset = AI_RIVAL_PRESETS[i % AI_RIVAL_PRESETS.length];
-    pack.push(createInitialAIState(difficulty, preset.name, preset.color, i));
+    pack.push(
+      createInitialAIState(
+        difficulty,
+        preset.name,
+        preset.color,
+        i,
+        trackCurve
+      )
+    );
   }
   return pack;
 }
@@ -263,8 +292,8 @@ export function updateAISimulation(
   const preset = AI_RIVAL_PRESETS[aiState.rivalIndex % AI_RIVAL_PRESETS.length];
 
   if (raceStatus !== "racing" || p.finished) {
-    if (raceStatus === "countdown") {
-      // Starting grid placement according to grid slot
+    if (raceStatus === "countdown" || raceStatus === "lobby") {
+      // Starting grid placement according to grid slot behind pole position
       const startPt = trackCurve.getPointAt(0);
       const tangent = trackCurve.getTangentAt(0).normalize();
       const normal = new THREE.Vector3(-tangent.z, 0, tangent.x);

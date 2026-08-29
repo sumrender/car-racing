@@ -55,45 +55,52 @@ if (!fs.existsSync(OUTPUT_DIR)) {
   fs.mkdirSync(OUTPUT_DIR, { recursive: true });
 }
 
-console.log("Generating studio-quality racing audio assets...");
+console.log("Generating NFS Most Wanted inspired racing audio assets...");
 
-// 1. ENGINE IDLE (Seamless 2.0s Loop of a throaty V8 rumble)
+// 1. ENGINE IDLE (NFS MW Aggressive Cam Loaf & Throaty V8/Straight-6 Mechanical Burble)
 {
   const duration = 2.0;
   const numSamples = Math.floor(duration * SAMPLE_RATE);
   const left = new Float32Array(numSamples);
   const right = new Float32Array(numSamples);
 
-  // V8 idle @ ~750 RPM -> cylinder firing freq ~ 50 Hz
-  const firingFreq = 50.0;
+  // Aggressive cam lope @ ~780 RPM -> ~52 Hz base combustion with irregular pulse modulation
+  const firingFreq = 52.0;
   for (let i = 0; i < numSamples; i++) {
     const t = i / SAMPLE_RATE;
-    // Cylinder firing pulse train (asymmetric pulse)
-    const phase = (t * firingFreq) % 1.0;
-    const cylinderPulse = Math.exp(-phase * 8) * Math.sin(phase * Math.PI * 4);
+    // Asymmetric race-cam lope modulation (unsteady high-lift camshaft)
+    const lope = 1 + 0.35 * Math.sin(2 * Math.PI * 4.2 * t) + 0.2 * Math.cos(2 * Math.PI * 8.4 * t);
+    const phase = (t * firingFreq * lope) % 1.0;
     
-    // Low rumble harmonics
-    const sub = Math.sin(2 * Math.PI * (firingFreq * 0.5) * t) * 0.4;
-    const fund = Math.sin(2 * Math.PI * firingFreq * t) * 0.35;
-    const h2 = Math.sin(2 * Math.PI * (firingFreq * 2) * t) * 0.25;
-    const h3 = Math.sin(2 * Math.PI * (firingFreq * 3) * t) * 0.15;
-    const h4 = Math.sin(2 * Math.PI * (firingFreq * 4) * t) * 0.1;
+    // Sharp cylinder combustion pulse
+    const cylinderPulse = Math.exp(-phase * 10) * Math.sin(phase * Math.PI * 5);
     
-    // Mechanical valve chatter & exhaust burble (pink-filtered noise)
-    const noiseL = (Math.random() * 2 - 1) * 0.08 * (1 + 0.5 * Math.sin(2 * Math.PI * firingFreq * t));
-    const noiseR = (Math.random() * 2 - 1) * 0.08 * (1 + 0.5 * Math.cos(2 * Math.PI * firingFreq * t));
+    // Low mechanical rumble harmonics (deep bass burble)
+    const sub = Math.sin(2 * Math.PI * 26 * t) * 0.45;
+    const fund = Math.sin(2 * Math.PI * 52 * t) * 0.4;
+    const h2 = Math.sin(2 * Math.PI * 104 * t) * 0.3;
+    const h3 = Math.sin(2 * Math.PI * 156 * t) * 0.22;
+    const h4 = Math.sin(2 * Math.PI * 208 * t) * 0.18;
+    const h5 = Math.sin(2 * Math.PI * 312 * t) * 0.12;
 
-    // Tube exhaust resonance simulation
-    const rawL = (cylinderPulse * 0.4 + sub + fund + h2 + h3 + h4 + noiseL);
-    const rawR = (cylinderPulse * 0.4 + sub + fund + h2 + h3 + h4 + noiseR);
+    // Straight-cut gear mesh idle tick & valve train rattle
+    const valvetrain = (Math.sin(2 * Math.PI * 1250 * t) + 0.5 * Math.sin(2 * Math.PI * 2400 * t)) * 
+      Math.exp(-((phase * 12) % 1.0) * 8) * 0.15;
 
-    // Warm tube saturation (soft clipping tanh)
-    left[i] = Math.tanh(rawL * 1.5) * 0.85;
-    right[i] = Math.tanh(rawR * 1.5) * 0.85;
+    // Deep exhaust burble with stereo differential
+    const burbleL = (Math.random() * 2 - 1) * 0.12 * (1 + 0.6 * Math.sin(2 * Math.PI * firingFreq * t));
+    const burbleR = (Math.random() * 2 - 1) * 0.12 * (1 + 0.6 * Math.cos(2 * Math.PI * firingFreq * t));
+
+    const rawL = (cylinderPulse * 0.5 + sub + fund + h2 + h3 + h4 + h5 + valvetrain + burbleL);
+    const rawR = (cylinderPulse * 0.5 + sub + fund + h2 + h3 + h4 + h5 + valvetrain + burbleR);
+
+    // Warm, gritty analogue tape & tube saturation
+    left[i] = Math.tanh(rawL * 1.8) * 0.9;
+    right[i] = Math.tanh(rawR * 1.8) * 0.9;
   }
 
   // Crossfade boundary for seamless loop
-  const crossfadeSamples = Math.floor(0.1 * SAMPLE_RATE);
+  const crossfadeSamples = Math.floor(0.12 * SAMPLE_RATE);
   for (let i = 0; i < crossfadeSamples; i++) {
     const frac = i / crossfadeSamples;
     const endIdx = numSamples - crossfadeSamples + i;
@@ -102,46 +109,60 @@ console.log("Generating studio-quality racing audio assets...");
   }
 
   fs.writeFileSync(path.join(OUTPUT_DIR, "engine_idle.wav"), createWavBuffer(SAMPLE_RATE, left, right));
-  console.log("-> engine_idle.wav created");
+  console.log("-> engine_idle.wav created (NFS MW Aggressive Cam Idle)");
 }
 
-// 2. ENGINE HIGH SPEED / ACCEL (Seamless 2.0s Loop of screaming V8/V10 at high RPM)
+// 2. ENGINE HIGH SPEED (NFS Most Wanted BMW M3 GTR Screamer with Straight-Cut Gear Whine & Induction Roar)
 {
   const duration = 2.0;
   const numSamples = Math.floor(duration * SAMPLE_RATE);
   const left = new Float32Array(numSamples);
   const right = new Float32Array(numSamples);
 
-  // High RPM engine @ ~6500 RPM -> ~433 Hz firing frequency
-  const baseFreq = 160.0;
+  // High RPM race V8/Straight-6 fundamental @ ~185Hz
+  const baseFreq = 185.0;
   for (let i = 0; i < numSamples; i++) {
     const t = i / SAMPLE_RATE;
-    // Harmonic series with formant shaping for racing intake growl
-    let engine = 0;
-    const numHarmonics = 12;
+
+    // 1. Screaming combustion harmonic series with aggressive intake formant shaping
+    let exhaustRoar = 0;
+    const numHarmonics = 16;
     for (let h = 1; h <= numHarmonics; h++) {
       const freq = baseFreq * h;
-      // Intake formant boost around 800Hz - 1500Hz
-      const formantGain = Math.exp(-Math.pow((freq - 1100) / 600, 2)) * 1.2 + 0.4 / h;
-      engine += Math.sin(2 * Math.PI * freq * t + h * 0.3) * formantGain;
+      // High-mid frequency resonance peaks (characteristic M3 GTR metallic rasp @ 1100Hz and 2200Hz)
+      const formant1 = Math.exp(-Math.pow((freq - 1150) / 400, 2)) * 1.6;
+      const formant2 = Math.exp(-Math.pow((freq - 2300) / 600, 2)) * 1.2;
+      const baseAmp = 0.55 / Math.pow(h, 0.75);
+      exhaustRoar += Math.sin(2 * Math.PI * freq * t + h * 0.4) * (baseAmp + formant1 + formant2);
     }
 
-    // Twin-turbocharger high-pitch whistle (compressor spool @ 3200Hz + flutter)
-    const turboFlutter = Math.sin(2 * Math.PI * 18 * t) * 80;
-    const turboWhistle = Math.sin(2 * Math.PI * (3200 + turboFlutter) * t) * 0.12;
+    // 2. THE ICONIC BMW M3 GTR STRAIGHT-CUT TRANSMISSION GEAR WHINE!
+    // High-pitched, teeth-meshing whine with FM sidebands
+    const gearFreq = 1650.0;
+    const gearWhineFM = Math.sin(2 * Math.PI * (baseFreq * 2) * t) * 35;
+    const gearWhine1 = Math.sin(2 * Math.PI * (gearFreq + gearWhineFM) * t) * 0.42;
+    const gearWhine2 = Math.sin(2 * Math.PI * ((gearFreq * 2) + gearWhineFM * 1.5) * t) * 0.22;
+    const gearWhine3 = Math.sin(2 * Math.PI * ((gearFreq * 3) + gearWhineFM * 2) * t) * 0.12;
+    const totalGearWhine = gearWhine1 + gearWhine2 + gearWhine3;
 
-    // High velocity intake air rush
-    const airHiss = (Math.random() * 2 - 1) * 0.15;
+    // 3. High-RPM Turbocharger Compressor Whistle & Ceramic Bearings
+    const turboFlutter = Math.sin(2 * Math.PI * 22 * t) * 120;
+    const turboWhistle = Math.sin(2 * Math.PI * (3800 + turboFlutter) * t) * 0.16;
 
-    const rawL = (engine * 0.18 + turboWhistle + airHiss);
-    const rawR = (engine * 0.18 + turboWhistle * 0.9 + (Math.random() * 2 - 1) * 0.15);
+    // 4. Razor-sharp induction air roar (filtered turbulent noise)
+    const airHissL = (Math.random() * 2 - 1) * 0.2;
+    const airHissR = (Math.random() * 2 - 1) * 0.2;
 
-    left[i] = Math.tanh(rawL * 2.0) * 0.85;
-    right[i] = Math.tanh(rawR * 2.0) * 0.85;
+    const rawL = (exhaustRoar * 0.18 + totalGearWhine + turboWhistle + airHissL);
+    const rawR = (exhaustRoar * 0.18 + totalGearWhine * 0.95 + turboWhistle * 1.05 + airHissR);
+
+    // Dynamic high-gain drive / distortion saturation (raw street racing grit)
+    left[i] = Math.tanh(rawL * 2.3) * 0.92;
+    right[i] = Math.tanh(rawR * 2.3) * 0.92;
   }
 
   // Crossfade ends for loop
-  const crossfadeSamples = Math.floor(0.1 * SAMPLE_RATE);
+  const crossfadeSamples = Math.floor(0.12 * SAMPLE_RATE);
   for (let i = 0; i < crossfadeSamples; i++) {
     const frac = i / crossfadeSamples;
     const endIdx = numSamples - crossfadeSamples + i;
@@ -150,44 +171,51 @@ console.log("Generating studio-quality racing audio assets...");
   }
 
   fs.writeFileSync(path.join(OUTPUT_DIR, "engine_high.wav"), createWavBuffer(SAMPLE_RATE, left, right));
-  console.log("-> engine_high.wav created");
+  console.log("-> engine_high.wav created (NFS MW M3 GTR Straight-Cut Gear Whine & Roar)");
 }
 
-// 3. NITRO BOOST (1.8s loopable jet afterburner & nitrous blowtorch surge)
+// 3. NITRO BOOST (NFS Most Wanted High-Pressure Purge, Sub Punch & Supersonic Jet Blast)
 {
-  const duration = 1.8;
+  const duration = 2.0;
   const numSamples = Math.floor(duration * SAMPLE_RATE);
   const left = new Float32Array(numSamples);
   const right = new Float32Array(numSamples);
 
-  let b0L = 0, b1L = 0, b2L = 0;
-  let b0R = 0, b1R = 0, b2R = 0;
+  let b0L = 0, b1L = 0;
+  let b0R = 0, b1R = 0;
 
   for (let i = 0; i < numSamples; i++) {
     const t = i / SAMPLE_RATE;
-    // Jet turbine rising whistle
-    const jetFreq = 2400 + Math.sin(t * Math.PI * 4) * 200 + 400 * Math.sin(t * 8);
-    const turbine = Math.sin(2 * Math.PI * jetFreq * t) * 0.22;
-    const subThrust = Math.sin(2 * Math.PI * 65 * t) * 0.35;
 
-    // Nitrous blowtorch high velocity roar (filtered noise)
+    // Initial high-pressure purge pop / surge transient
+    const purgeEnv = t < 0.25 ? Math.exp(-t * 12.0) : 0;
+    const purgeBlast = (Math.random() * 2 - 1) * purgeEnv * 0.8;
+
+    // Deep sub-bass punch & supersonic thrust (48Hz rumble)
+    const subThrust = Math.sin(2 * Math.PI * 48 * t) * 0.45;
+    const subHarmonic = Math.sin(2 * Math.PI * 96 * t) * 0.25;
+
+    // Hypersonic jet turbine whistle (3200Hz - 4400Hz with speed modulation)
+    const jetFreq = 3200 + Math.sin(t * Math.PI * 6) * 350 + 250 * Math.sin(t * 14);
+    const turbineWhine = Math.sin(2 * Math.PI * jetFreq * t) * 0.32;
+
+    // High velocity nitrous blowtorch roar
     const whiteL = Math.random() * 2 - 1;
     const whiteR = Math.random() * 2 - 1;
 
-    // Resonant bandpass filter approximation
-    b0L = 0.85 * b0L + 0.15 * whiteL;
-    b1L = 0.85 * b1L + 0.15 * (whiteL - b0L);
-    b0R = 0.85 * b0R + 0.15 * whiteR;
-    b1R = 0.85 * b1R + 0.15 * (whiteR - b0R);
+    b0L = 0.82 * b0L + 0.18 * whiteL;
+    b1L = 0.82 * b1L + 0.18 * (whiteL - b0L);
+    b0R = 0.82 * b0R + 0.18 * whiteR;
+    b1R = 0.82 * b1R + 0.18 * (whiteR - b0R);
 
-    // Dynamic flame combustion crackle
-    const crackle = Math.random() > 0.985 ? (Math.random() * 2 - 1) * 0.4 : 0;
+    // Nitrous combustion flame crackle & pop
+    const flameCrackle = Math.random() > 0.97 ? (Math.random() * 2 - 1) * 0.5 : 0;
 
-    const rawL = (turbine + subThrust + (whiteL - b0L) * 0.5 + b0L * 0.3 + crackle);
-    const rawR = (turbine * 0.95 + subThrust + (whiteR - b0R) * 0.5 + b0R * 0.3 + crackle);
+    const rawL = (purgeBlast + subThrust + subHarmonic + turbineWhine + (whiteL - b0L) * 0.6 + flameCrackle);
+    const rawR = (purgeBlast * 0.9 + subThrust + subHarmonic + turbineWhine * 0.95 + (whiteR - b0R) * 0.6 + flameCrackle);
 
-    left[i] = Math.tanh(rawL * 1.6) * 0.9;
-    right[i] = Math.tanh(rawR * 1.6) * 0.9;
+    left[i] = Math.tanh(rawL * 2.0) * 0.95;
+    right[i] = Math.tanh(rawR * 2.0) * 0.95;
   }
 
   // Crossfade
@@ -200,49 +228,56 @@ console.log("Generating studio-quality racing audio assets...");
   }
 
   fs.writeFileSync(path.join(OUTPUT_DIR, "nitro.wav"), createWavBuffer(SAMPLE_RATE, left, right));
-  console.log("-> nitro.wav created");
+  console.log("-> nitro.wav created (NFS MW Nitrous Blast)");
 }
 
-// 4. CAR CRASH / IMPACT (1.2s explosive physical vehicle collision)
+// 4. GEAR SHIFT (NFS MW Sequential Transmission Slam + Blow-Off Flutter + Gunshot Exhaust Pop)
 {
-  const duration = 1.2;
+  const duration = 0.45;
   const numSamples = Math.floor(duration * SAMPLE_RATE);
   const left = new Float32Array(numSamples);
   const right = new Float32Array(numSamples);
 
   for (let i = 0; i < numSamples; i++) {
     const t = i / SAMPLE_RATE;
-    const envImpact = Math.exp(-t * 16.0); // Fast transient
-    const envBody = Math.exp(-t * 4.5);   // Metal deformation decay
-    const envGlass = Math.exp(-t * 2.5);  // Glass scatter
 
-    // 1. Heavy sub-bass body crumple (45Hz down to 25Hz)
-    const pitchDrop = 60 * Math.exp(-t * 12.0) + 30;
-    const thud = Math.sin(2 * Math.PI * pitchDrop * t) * envImpact * 0.8;
+    // 1. Heavy pneumatic dog-box transmission actuator slam (0 to 0.06s)
+    const slamEnv = Math.exp(-t * 60.0);
+    const gearClunk = (Math.sin(2 * Math.PI * 180 * t) + 0.6 * Math.sin(2 * Math.PI * 450 * t)) * slamEnv * 0.8;
+    const metalClick = Math.sin(2 * Math.PI * 2200 * t) * Math.exp(-t * 120.0) * 0.5;
 
-    // 2. Violent metal crumple & chassis fracture (distorted noise bursts)
-    const metalNoiseL = (Math.random() * 2 - 1) * envBody * 0.65;
-    const metalNoiseR = (Math.random() * 2 - 1) * envBody * 0.65;
+    // 2. ICONIC TURBO BLOW-OFF VALVE / COMPRESSOR SURGE FLUTTER ("tsu-tsu-tsu-pssshh")
+    let bovFlutter = 0;
+    if (t > 0.02) {
+      const dt = t - 0.02;
+      const flutterFreq = 28.0; // Rapid surge pulses
+      const pulse = Math.pow(Math.max(0, Math.sin(2 * Math.PI * flutterFreq * dt)), 2);
+      const flutterEnv = Math.exp(-dt * 10.0);
+      const whiteNoise = Math.random() * 2 - 1;
+      const whistle = Math.sin(2 * Math.PI * 3400 * dt) * 0.3;
+      bovFlutter = (whiteNoise * 0.7 + whistle) * pulse * flutterEnv * 0.75;
+    }
 
-    // 3. Metallic ring resonance (780Hz & 1420Hz metallic beam ring)
-    const metalRing = (Math.sin(2 * Math.PI * 780 * t) + 0.6 * Math.sin(2 * Math.PI * 1420 * t)) * Math.exp(-t * 6.0) * 0.35;
+    // 3. GUNSHOT TWO-STEP / ANTI-LAG EXHAUST BACKFIRE POP (at t = 0.05s)
+    let exhaustPop = 0;
+    if (t > 0.045) {
+      const pt = t - 0.045;
+      const popEnv = Math.exp(-pt * 35.0);
+      const subBoom = Math.sin(2 * Math.PI * 65 * pt) * popEnv * 0.9;
+      const crackle = (Math.random() * 2 - 1) * popEnv * 0.85;
+      exhaustPop = subBoom + crackle;
+    }
 
-    // 4. Glass shatter scatter debris (high-freq crackles)
-    const glassCrackle = (Math.random() > 0.94 ? (Math.random() * 2 - 1) * 0.5 : 0) * envGlass;
-
-    const rawL = (thud + metalNoiseL + metalRing + glassCrackle);
-    const rawR = (thud + metalNoiseR + metalRing * 0.9 + glassCrackle);
-
-    // Hard saturation for brutal cinematic impact
-    left[i] = Math.tanh(rawL * 2.2) * 0.95;
-    right[i] = Math.tanh(rawR * 2.2) * 0.95;
+    const raw = (gearClunk + metalClick + bovFlutter + exhaustPop);
+    left[i] = Math.tanh(raw * 2.2) * 0.95;
+    right[i] = Math.tanh(raw * 2.2) * 0.95;
   }
 
-  fs.writeFileSync(path.join(OUTPUT_DIR, "crash.wav"), createWavBuffer(SAMPLE_RATE, left, right));
-  console.log("-> crash.wav created");
+  fs.writeFileSync(path.join(OUTPUT_DIR, "gear_shift.wav"), createWavBuffer(SAMPLE_RATE, left, right));
+  console.log("-> gear_shift.wav created (NFS MW Dog-Box + BOV Flutter + Exhaust Pop)");
 }
 
-// 5. DRIFT / TIRE SCREECH (1.5s seamless tire friction squeal & asphalt shear)
+// 5. DRIFT / TIRE SCREECH (NFS MW High-G Asphalt Friction & Burning Rubber Squeal)
 {
   const duration = 1.5;
   const numSamples = Math.floor(duration * SAMPLE_RATE);
@@ -251,29 +286,35 @@ console.log("Generating studio-quality racing audio assets...");
 
   for (let i = 0; i < numSamples; i++) {
     const t = i / SAMPLE_RATE;
-    // Dual acoustic resonance peaks for rubber squeal (850Hz & 1450Hz with frequency jitter)
-    const jitter = Math.sin(2 * Math.PI * 23 * t) * 45 + Math.sin(2 * Math.PI * 41 * t) * 30;
-    const f1 = 820 + jitter;
-    const f2 = 1380 + jitter * 1.3;
-    const f3 = 2200 + jitter * 1.8;
 
-    const squeal1 = Math.sin(2 * Math.PI * f1 * t) * 0.35;
-    const squeal2 = Math.sin(2 * Math.PI * f2 * t) * 0.28;
-    const squeal3 = Math.sin(2 * Math.PI * f3 * t) * 0.15;
+    // Multi-harmonic tire slip squeal with aggressive slip angle frequency flutter
+    const slipMod = Math.sin(2 * Math.PI * 18 * t) * 65 + Math.sin(2 * Math.PI * 37 * t) * 45;
+    const f1 = 840 + slipMod;
+    const f2 = 1420 + slipMod * 1.4;
+    const f3 = 2150 + slipMod * 1.9;
+    const f4 = 3100 + slipMod * 2.3;
 
-    // Asphalt granulate friction noise
-    const asphaltL = (Math.random() * 2 - 1) * 0.25;
-    const asphaltR = (Math.random() * 2 - 1) * 0.25;
+    const squeal1 = Math.sin(2 * Math.PI * f1 * t) * 0.4;
+    const squeal2 = Math.sin(2 * Math.PI * f2 * t) * 0.32;
+    const squeal3 = Math.sin(2 * Math.PI * f3 * t) * 0.22;
+    const squeal4 = Math.sin(2 * Math.PI * f4 * t) * 0.12;
 
-    const rawL = (squeal1 + squeal2 + squeal3 + asphaltL);
-    const rawR = (squeal1 * 0.9 + squeal2 * 1.1 + squeal3 + asphaltR);
+    // Granular asphalt friction grit & road texture noise
+    const gritL = (Math.random() * 2 - 1) * 0.35;
+    const gritR = (Math.random() * 2 - 1) * 0.35;
 
-    left[i] = Math.tanh(rawL * 1.5) * 0.85;
-    right[i] = Math.tanh(rawR * 1.5) * 0.85;
+    // Low tire carcass roar (120Hz)
+    const carcassRoar = Math.sin(2 * Math.PI * 135 * t) * 0.25;
+
+    const rawL = (squeal1 + squeal2 + squeal3 + squeal4 + carcassRoar + gritL);
+    const rawR = (squeal1 * 0.9 + squeal2 * 1.1 + squeal3 * 0.95 + squeal4 * 1.05 + carcassRoar + gritR);
+
+    left[i] = Math.tanh(rawL * 1.8) * 0.9;
+    right[i] = Math.tanh(rawR * 1.8) * 0.9;
   }
 
   // Crossfade for loop
-  const crossfadeSamples = Math.floor(0.1 * SAMPLE_RATE);
+  const crossfadeSamples = Math.floor(0.12 * SAMPLE_RATE);
   for (let i = 0; i < crossfadeSamples; i++) {
     const frac = i / crossfadeSamples;
     const endIdx = numSamples - crossfadeSamples + i;
@@ -282,10 +323,48 @@ console.log("Generating studio-quality racing audio assets...");
   }
 
   fs.writeFileSync(path.join(OUTPUT_DIR, "drift.wav"), createWavBuffer(SAMPLE_RATE, left, right));
-  console.log("-> drift.wav created");
+  console.log("-> drift.wav created (NFS MW High-G Drift Squeal)");
 }
 
-// 6. WALL SCRAPE / GUARDRAIL (1.2s metal-on-steel friction & sparks)
+// 6. CAR CRASH / COLLISION (NFS MW Cinematic Vehicle Crunch, Sub Thud & Glass Shatter)
+{
+  const duration = 1.4;
+  const numSamples = Math.floor(duration * SAMPLE_RATE);
+  const left = new Float32Array(numSamples);
+  const right = new Float32Array(numSamples);
+
+  for (let i = 0; i < numSamples; i++) {
+    const t = i / SAMPLE_RATE;
+    const envImpact = Math.exp(-t * 18.0); // Ultra-fast transient punch
+    const envBody = Math.exp(-t * 4.0);    // Metal deformation decay
+    const envGlass = Math.exp(-t * 2.2);   // Glass & debris scatter
+
+    // 1. Heavy cinematic bass drop / sub-bass frame shock (down to 24Hz)
+    const pitchDrop = 75 * Math.exp(-t * 14.0) + 24;
+    const subImpact = Math.sin(2 * Math.PI * pitchDrop * t) * envImpact * 0.95;
+
+    // 2. Heavy steel chassis crumple and buckling (fracture noise)
+    const crumpleNoiseL = (Math.random() * 2 - 1) * envBody * 0.75;
+    const crumpleNoiseR = (Math.random() * 2 - 1) * envBody * 0.75;
+
+    // 3. Metallic ring resonance (680Hz & 1320Hz steel barrier ring)
+    const metalRing = (Math.sin(2 * Math.PI * 680 * t) + 0.7 * Math.sin(2 * Math.PI * 1320 * t)) * Math.exp(-t * 5.0) * 0.45;
+
+    // 4. Shattered glass scatter & shrapnel spray
+    const glassScatter = (Math.random() > 0.92 ? (Math.random() * 2 - 1) * 0.6 : 0) * envGlass;
+
+    const rawL = (subImpact + crumpleNoiseL + metalRing + glassScatter);
+    const rawR = (subImpact + crumpleNoiseR + metalRing * 0.9 + glassScatter);
+
+    left[i] = Math.tanh(rawL * 2.5) * 0.98;
+    right[i] = Math.tanh(rawR * 2.5) * 0.98;
+  }
+
+  fs.writeFileSync(path.join(OUTPUT_DIR, "crash.wav"), createWavBuffer(SAMPLE_RATE, left, right));
+  console.log("-> crash.wav created (NFS MW Cinematic Crash)");
+}
+
+// 7. WALL SCRAPE / GUARDRAIL (NFS MW Corrugated Steel Guardrail Friction & Sparks)
 {
   const duration = 1.2;
   const numSamples = Math.floor(duration * SAMPLE_RATE);
@@ -294,22 +373,22 @@ console.log("Generating studio-quality racing audio assets...");
 
   for (let i = 0; i < numSamples; i++) {
     const t = i / SAMPLE_RATE;
-    // Guardrail corrugated rail vibration (around 320Hz modulated)
-    const corrugation = Math.sin(2 * Math.PI * 340 * t) * 0.35;
+    // Guardrail corrugated rail vibration frequency modulation (380Hz)
+    const corrugation = Math.sin(2 * Math.PI * 380 * t) * 0.4;
     
     // High-pitched grinding metal rasp
-    const raspFreq = 1800 + Math.sin(t * 60) * 300;
-    const metalRasp = Math.sin(2 * Math.PI * raspFreq * t) * 0.25;
+    const raspFreq = 2400 + Math.sin(t * 80) * 400;
+    const metalRasp = Math.sin(2 * Math.PI * raspFreq * t) * 0.35;
 
-    // Spark spatter noise
-    const sparksL = (Math.random() * 2 - 1) * 0.35;
-    const sparksR = (Math.random() * 2 - 1) * 0.35;
+    // Spark shower crackle
+    const sparksL = (Math.random() * 2 - 1) * 0.4;
+    const sparksR = (Math.random() * 2 - 1) * 0.4;
 
     const rawL = (corrugation + metalRasp + sparksL);
-    const rawR = (corrugation * 0.9 + metalRasp * 1.1 + sparksR);
+    const rawR = (corrugation * 0.95 + metalRasp * 1.05 + sparksR);
 
-    left[i] = Math.tanh(rawL * 1.7) * 0.88;
-    right[i] = Math.tanh(rawR * 1.7) * 0.88;
+    left[i] = Math.tanh(rawL * 1.9) * 0.92;
+    right[i] = Math.tanh(rawR * 1.9) * 0.92;
   }
 
   // Crossfade for loop
@@ -322,63 +401,36 @@ console.log("Generating studio-quality racing audio assets...");
   }
 
   fs.writeFileSync(path.join(OUTPUT_DIR, "wall_scrape.wav"), createWavBuffer(SAMPLE_RATE, left, right));
-  console.log("-> wall_scrape.wav created");
+  console.log("-> wall_scrape.wav created (NFS MW Guardrail Grind)");
 }
 
-// 7. GEAR SHIFT (0.35s crisp sequential paddle shift + blow-off valve + exhaust pop)
+// 8. LANDING / SUSPENSION THUD (NFS MW Hard Rally Landing & Chassis Scraping)
 {
-  const duration = 0.35;
+  const duration = 0.45;
   const numSamples = Math.floor(duration * SAMPLE_RATE);
   const left = new Float32Array(numSamples);
   const right = new Float32Array(numSamples);
 
   for (let i = 0; i < numSamples; i++) {
     const t = i / SAMPLE_RATE;
-    // 1. Mechanical shift actuator click (0 to 0.05s)
-    const clickEnv = Math.exp(-t * 80.0);
-    const click = Math.sin(2 * Math.PI * 1800 * t) * clickEnv * 0.6;
+    const env = Math.exp(-t * 14.0);
+    const pitch = 85 * Math.exp(-t * 22.0) + 38;
+    const sub = Math.sin(2 * Math.PI * pitch * t) * env * 0.85;
+    const damperCompression = (Math.random() * 2 - 1) * Math.exp(-t * 28.0) * 0.4;
 
-    // 2. Turbo blow-off valve *pssshh* (0.02 to 0.25s)
-    const bovEnv = t > 0.02 ? Math.exp(-(t - 0.02) * 14.0) : 0;
-    const bovHiss = (Math.random() * 2 - 1) * bovEnv * 0.45;
+    // Quick tire chirp on touchdown
+    const chirp = Math.sin(2 * Math.PI * (1600 * Math.exp(-t * 40)) * t) * Math.exp(-t * 30) * 0.35;
 
-    // 3. Exhaust backfire pop at 0.06s
-    const popEnv = t > 0.06 ? Math.exp(-(t - 0.06) * 45.0) : 0;
-    const pop = (Math.sin(2 * Math.PI * 95 * t) + (Math.random() * 2 - 1) * 0.5) * popEnv * 0.7;
-
-    const raw = click + bovHiss + pop;
-    left[i] = Math.tanh(raw * 1.8) * 0.9;
-    right[i] = Math.tanh(raw * 1.8) * 0.9;
-  }
-
-  fs.writeFileSync(path.join(OUTPUT_DIR, "gear_shift.wav"), createWavBuffer(SAMPLE_RATE, left, right));
-  console.log("-> gear_shift.wav created");
-}
-
-// 8. LANDING / SUSPENSION THUD (0.4s heavy chassis compression)
-{
-  const duration = 0.4;
-  const numSamples = Math.floor(duration * SAMPLE_RATE);
-  const left = new Float32Array(numSamples);
-  const right = new Float32Array(numSamples);
-
-  for (let i = 0; i < numSamples; i++) {
-    const t = i / SAMPLE_RATE;
-    const env = Math.exp(-t * 12.0);
-    const pitch = 70 * Math.exp(-t * 20.0) + 35;
-    const sub = Math.sin(2 * Math.PI * pitch * t) * env * 0.75;
-    const suspensionNoise = (Math.random() * 2 - 1) * Math.exp(-t * 25.0) * 0.35;
-
-    const raw = sub + suspensionNoise;
-    left[i] = Math.tanh(raw * 1.8) * 0.9;
-    right[i] = Math.tanh(raw * 1.8) * 0.9;
+    const raw = sub + damperCompression + chirp;
+    left[i] = Math.tanh(raw * 2.0) * 0.95;
+    right[i] = Math.tanh(raw * 2.0) * 0.95;
   }
 
   fs.writeFileSync(path.join(OUTPUT_DIR, "landing.wav"), createWavBuffer(SAMPLE_RATE, left, right));
-  console.log("-> landing.wav created");
+  console.log("-> landing.wav created (NFS MW Heavy Suspension Landing)");
 }
 
-// 9. HIGH SPEED WIND WHOOSH (1.5s aerodynamic cockpit wind loop)
+// 9. HIGH SPEED WIND WHOOSH (NFS MW Aerodynamic Cockpit Wind Vortex)
 {
   const duration = 1.5;
   const numSamples = Math.floor(duration * SAMPLE_RATE);
@@ -391,13 +443,13 @@ console.log("Generating studio-quality racing audio assets...");
     const whiteL = Math.random() * 2 - 1;
     const whiteR = Math.random() * 2 - 1;
 
-    bL = 0.92 * bL + 0.08 * whiteL;
-    bR = 0.92 * bR + 0.08 * whiteR;
+    bL = 0.88 * bL + 0.12 * whiteL;
+    bR = 0.88 * bR + 0.12 * whiteR;
 
-    // Cockpit pressure fluctuation
-    const buffeting = 1 + 0.25 * Math.sin(2 * Math.PI * 9 * t);
-    left[i] = bL * buffeting * 0.7;
-    right[i] = bR * buffeting * 0.7;
+    // Low-frequency cockpit air buffet
+    const buffeting = 1 + 0.35 * Math.sin(2 * Math.PI * 12 * t);
+    left[i] = bL * buffeting * 0.75;
+    right[i] = bR * buffeting * 0.75;
   }
 
   // Crossfade
@@ -410,36 +462,36 @@ console.log("Generating studio-quality racing audio assets...");
   }
 
   fs.writeFileSync(path.join(OUTPUT_DIR, "wind_whoosh.wav"), createWavBuffer(SAMPLE_RATE, left, right));
-  console.log("-> wind_whoosh.wav created");
+  console.log("-> wind_whoosh.wav created (NFS MW Wind Vortex)");
 }
 
-// 10. POLISHED UI TEST CHIME (0.6s clean musical confirmation tone)
+// 10. POLISHED HUD / CHECKPOINT CHIME (NFS MW Speedtrap / Milestone Ping)
 {
-  const duration = 0.6;
+  const duration = 0.65;
   const numSamples = Math.floor(duration * SAMPLE_RATE);
   const left = new Float32Array(numSamples);
   const right = new Float32Array(numSamples);
 
   for (let i = 0; i < numSamples; i++) {
     const t = i / SAMPLE_RATE;
-    // Chord: E5 (659.25 Hz) + B5 (987.77 Hz) + E6 (1318.5 Hz)
-    const env1 = Math.exp(-t * 6.0);
-    const env2 = t > 0.08 ? Math.exp(-(t - 0.08) * 5.0) : 0;
-    const env3 = t > 0.16 ? Math.exp(-(t - 0.16) * 4.0) : 0;
+    // Electronic synth ping chord: D5 (587.33Hz) + A5 (880Hz) + D6 (1174.66Hz) + F#6 (1479.98Hz)
+    const env1 = Math.exp(-t * 7.0);
+    const env2 = t > 0.05 ? Math.exp(-(t - 0.05) * 6.0) : 0;
+    const env3 = t > 0.1 ? Math.exp(-(t - 0.1) * 5.0) : 0;
 
-    const tone1 = Math.sin(2 * Math.PI * 659.25 * t) * env1 * 0.35;
-    const tone2 = Math.sin(2 * Math.PI * 987.77 * t) * env2 * 0.35;
-    const tone3 = Math.sin(2 * Math.PI * 1318.5 * t) * env3 * 0.3;
+    const tone1 = Math.sin(2 * Math.PI * 587.33 * t) * env1 * 0.35;
+    const tone2 = Math.sin(2 * Math.PI * 880 * t) * env2 * 0.35;
+    const tone3 = Math.sin(2 * Math.PI * 1479.98 * t) * env3 * 0.3;
 
     const rawL = tone1 + tone2 * 0.8 + tone3;
     const rawR = tone1 * 0.8 + tone2 + tone3;
 
-    left[i] = rawL * 0.85;
-    right[i] = rawR * 0.85;
+    left[i] = rawL * 0.9;
+    right[i] = rawR * 0.9;
   }
 
   fs.writeFileSync(path.join(OUTPUT_DIR, "chime.wav"), createWavBuffer(SAMPLE_RATE, left, right));
-  console.log("-> chime.wav created");
+  console.log("-> chime.wav created (NFS MW Milestone Chime)");
 }
 
-console.log("All audio assets successfully built!");
+console.log("All NFS Most Wanted racing audio assets successfully built!");

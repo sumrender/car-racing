@@ -12,6 +12,7 @@ export interface TrackSceneComponents {
   checkpointPositions: THREE.Vector3[];
   gridMesh: THREE.Mesh;
   starPoints: THREE.Points;
+  startGridGroup: THREE.Group;
 }
 
 export function buildTrackSceneComponents(
@@ -271,6 +272,70 @@ export function buildTrackSceneComponents(
   const starPoints = new THREE.Points(starsGeo, starsMat);
   starPoints.visible = isDark;
 
+  // 7. START / FINISH LINE & STARTING GRID SLOTS
+  const startGridGroup = new THREE.Group();
+  const startPoint = trackCurve.getPointAt(0);
+  const startTangent = trackCurve.getTangentAt(0).normalize();
+  const startNormal = new THREE.Vector3(-startTangent.z, 0, startTangent.x);
+
+  // 7.1 Start / Finish Checkered Line
+  const lineGeo = new THREE.PlaneGeometry(roadWidth, 1.8);
+  const lineMat = new THREE.MeshBasicMaterial({
+    color: "#ffffff",
+    side: THREE.DoubleSide,
+  });
+  const startLineMesh = new THREE.Mesh(lineGeo, lineMat);
+  startLineMesh.rotation.x = -Math.PI / 2;
+  startLineMesh.rotation.z = -Math.atan2(startTangent.x, startTangent.z);
+  startLineMesh.position.set(startPoint.x, startPoint.y + 0.04, startPoint.z);
+  startGridGroup.add(startLineMesh);
+
+  // 7.2 Pole Position & Grid Box Markings
+  const gridSlots = [
+    { slot: 1, lat: 0, z: 3.0, color: "#38bdf8", isPole: true }, // P1 Player: Pole Position Ahead
+    { slot: 2, lat: 3.4, z: -8.0, color: "#ef4444", isPole: false }, // P2
+    { slot: 3, lat: -3.4, z: -15.0, color: "#10b981", isPole: false }, // P3
+    { slot: 4, lat: 3.4, z: -22.0, color: "#8b5cf6", isPole: false }, // P4
+    { slot: 5, lat: -3.4, z: -29.0, color: "#06b6d4", isPole: false }, // P5
+    { slot: 6, lat: 2.8, z: -36.0, color: "#f59e0b", isPole: false }, // P6
+  ];
+
+  gridSlots.forEach((slot) => {
+    const slotPos = startPoint
+      .clone()
+      .add(startNormal.clone().multiplyScalar(slot.lat))
+      .add(startTangent.clone().multiplyScalar(slot.z));
+
+    const boxWidth = slot.isPole ? 4.5 : 3.8;
+    const boxLength = slot.isPole ? 6.5 : 5.8;
+    const boxGeo = new THREE.PlaneGeometry(boxWidth, boxLength);
+    const boxMat = new THREE.MeshBasicMaterial({
+      color: new THREE.Color(slot.color),
+      wireframe: true,
+      transparent: true,
+      opacity: slot.isPole ? 0.85 : 0.45,
+      side: THREE.DoubleSide,
+    });
+    const boxMesh = new THREE.Mesh(boxGeo, boxMat);
+    boxMesh.rotation.x = -Math.PI / 2;
+    boxMesh.rotation.z = -Math.atan2(startTangent.x, startTangent.z);
+    boxMesh.position.set(slotPos.x, slotPos.y + 0.05, slotPos.z);
+    startGridGroup.add(boxMesh);
+
+    // Front limit bar for each slot
+    const barGeo = new THREE.PlaneGeometry(boxWidth, 0.4);
+    const barMat = new THREE.MeshBasicMaterial({
+      color: new THREE.Color(slot.color),
+      side: THREE.DoubleSide,
+    });
+    const barMesh = new THREE.Mesh(barGeo, barMat);
+    barMesh.rotation.x = -Math.PI / 2;
+    barMesh.rotation.z = -Math.atan2(startTangent.x, startTangent.z);
+    const barPos = slotPos.clone().add(startTangent.clone().multiplyScalar(boxLength / 2));
+    barMesh.position.set(barPos.x, barPos.y + 0.06, barPos.z);
+    startGridGroup.add(barMesh);
+  });
+
   return {
     roadMesh,
     curbLeftMesh,
@@ -281,5 +346,6 @@ export function buildTrackSceneComponents(
     checkpointPositions,
     gridMesh,
     starPoints,
+    startGridGroup,
   };
 }

@@ -52,10 +52,27 @@ interface UseCarPhysicsOptions {
   track?: TrackConfig;
 }
 
+export function getPolePosition(track: TrackConfig): {
+  x: number;
+  y: number;
+  z: number;
+  rotationY: number;
+} {
+  const startPt = track.curve.getPointAt(0);
+  const tangent = track.curve.getTangentAt(0).normalize();
+  const polePos = startPt.clone().add(tangent.clone().multiplyScalar(3.0));
+  return {
+    x: polePos.x,
+    y: polePos.y,
+    z: polePos.z,
+    rotationY: Math.atan2(tangent.x, tangent.z),
+  };
+}
+
 const INITIAL_CAR_STATE: CarPhysicsState = {
   x: 0,
   y: 0,
-  z: 0,
+  z: 3.0,
   rotationY: 0,
   speed: 0,
   driftScore: 0,
@@ -98,6 +115,11 @@ export function useCarPhysics(options: UseCarPhysicsOptions = {}) {
 
   useEffect(() => {
     trackRef.current = track || getTrack();
+    const pole = getPolePosition(trackRef.current);
+    carStateRef.current.x = pole.x;
+    carStateRef.current.y = pole.y;
+    carStateRef.current.z = pole.z;
+    carStateRef.current.rotationY = pole.rotationY;
   }, [track]);
 
   useEffect(() => {
@@ -116,7 +138,14 @@ export function useCarPhysics(options: UseCarPhysicsOptions = {}) {
     };
   }, []);
 
-  const carStateRef = useRef<CarPhysicsState>({ ...INITIAL_CAR_STATE });
+  const initialPole = getPolePosition(track || getTrack());
+  const carStateRef = useRef<CarPhysicsState>({
+    ...INITIAL_CAR_STATE,
+    x: initialPole.x,
+    y: initialPole.y,
+    z: initialPole.z,
+    rotationY: initialPole.rotationY,
+  });
   const jumpStateRef = useRef<CarJumpState>({ ...INITIAL_JUMP_STATE });
   const currentSteerAngleRef = useRef<number>(0);
   const nitroExhaustTimerRef = useRef<number>(0);
@@ -178,8 +207,13 @@ export function useCarPhysics(options: UseCarPhysicsOptions = {}) {
   }, [nitroOverlayRef]);
 
   const resetPhysics = useCallback((customState?: Partial<CarPhysicsState>) => {
+    const pole = getPolePosition(trackRef.current);
     carStateRef.current = {
       ...INITIAL_CAR_STATE,
+      x: pole.x,
+      y: pole.y,
+      z: pole.z,
+      rotationY: pole.rotationY,
       ...customState,
     };
     jumpStateRef.current = {
@@ -271,7 +305,11 @@ export function useCarPhysics(options: UseCarPhysicsOptions = {}) {
         pState.x = correctedPos.x;
         pState.z = correctedPos.z;
 
-        pState.speed = Math.max(pState.speed * 0.96, 18);
+        if (pState.speed > 0) {
+          pState.speed = Math.max(pState.speed * 0.96, 18);
+        } else if (pState.speed < 0) {
+          pState.speed = Math.min(pState.speed * 0.9, -8);
+        }
 
         // Play wall / guard rail scrape and impact sound
         soundRef.current.playWallScrape(pState.speed, Math.min(Math.abs(pState.speed) / 45, 1.0));
@@ -301,13 +339,19 @@ export function useCarPhysics(options: UseCarPhysicsOptions = {}) {
       }
 
       const targetMaxSpeed = pState.boostTimer > 0 ? 105 : 62;
-      const accelRate = 22.0;
-      const nitroAccelRate = 45.0;
-      const brakeRate = 33.0;
-      const frictionRate = 6.0;
+      const targetMaxReverseSpeed = -32.0;
+      const accelRate = 24.0;
+      const nitroAccelRate = 48.0;
+      const forwardBrakeRate = 72.0; // High-performance stopping power
+      const reverseAccelRate = 34.0; // Rapid reverse launch ASAP
+      const reverseBrakeRate = 68.0; // Rapid forward recovery from reverse
+      const frictionRate = 7.0;
 
       if (keys.space || pState.boostTimer > 0) {
-        if (pState.speed < targetMaxSpeed) {
+        if (pState.speed < 0) {
+          // If in reverse, boost quickly pushes forward
+          pState.speed += reverseBrakeRate * 1.5 * dt;
+        } else if (pState.speed < targetMaxSpeed) {
           pState.speed += nitroAccelRate * dt;
         } else {
           pState.speed -= Math.min(
@@ -341,7 +385,13 @@ export function useCarPhysics(options: UseCarPhysicsOptions = {}) {
           }
         }
       } else if (keys.w) {
-        if (pState.speed < targetMaxSpeed) {
+        if (pState.speed < 0) {
+          // Rapidly brake backwards motion and transition to forward
+          pState.speed += reverseBrakeRate * dt;
+          if (pState.speed > -0.4) {
+            pState.speed = Math.max(0, pState.speed);
+          }
+        } else if (pState.speed < targetMaxSpeed) {
           pState.speed += accelRate * dt;
         } else {
           pState.speed -= Math.min(
@@ -350,8 +400,18 @@ export function useCarPhysics(options: UseCarPhysicsOptions = {}) {
           );
         }
       } else if (keys.s) {
-        if (pState.speed > -20) {
-          pState.speed -= brakeRate * dt;
+        if (pState.speed > 0) {
+          // Aggressively brake forward momentum to a stop
+          pState.speed -= forwardBrakeRate * dt;
+          // If speed drops near zero, snap to zero and immediately start reversing
+          if (pState.speed < 0.6) {
+            pState.speed = 0;
+          }
+        } else {
+          // Instantly accelerate into reverse ASAP
+          if (pState.speed > targetMaxReverseSpeed) {
+            pState.speed -= reverseAccelRate * dt;
+          }
         }
       } else {
         if (!jumpStateRef.current.isAirborne) {
@@ -359,24 +419,42 @@ export function useCarPhysics(options: UseCarPhysicsOptions = {}) {
             pState.speed -= frictionRate * dt;
             if (pState.speed < 0) pState.speed = 0;
           } else if (pState.speed < 0) {
-            pState.speed += frictionRate * dt;
+            pState.speed += frictionRate * 1.5 * dt;
             if (pState.speed > 0) pState.speed = 0;
           }
         }
       }
 
       // 3. Steering and Wheel Orientation
-      const steerSpeed = 1.35;
-      const speedRatio = Math.min(Math.abs(pState.speed) / 45, 1.3);
+      const steerSpeed = 1.45;
+      const isReversing = pState.speed < -0.2;
 
       let targetSteer = 0;
-      if (keys.a) {
-        pState.rotationY += steerSpeed * speedRatio * dt;
-        targetSteer = 0.35;
-      } else if (keys.d) {
-        pState.rotationY -= steerSpeed * speedRatio * dt;
-        targetSteer = -0.35;
+      if (isReversing) {
+        // Natural reverse steering: turning left swings rear left
+        const revRatio = Math.min(Math.max(Math.abs(pState.speed) / 20, 0.5), 1.25);
+        if (keys.a) {
+          pState.rotationY -= steerSpeed * revRatio * dt;
+          targetSteer = 0.35;
+        } else if (keys.d) {
+          pState.rotationY += steerSpeed * revRatio * dt;
+          targetSteer = -0.35;
+        }
+      } else {
+        // Forward / stationary steering
+        const fwdRatio = Math.min(
+          Math.max(Math.abs(pState.speed) / 40, keys.w || keys.s ? 0.35 : 0),
+          1.3
+        );
+        if (keys.a) {
+          pState.rotationY += steerSpeed * fwdRatio * dt;
+          targetSteer = 0.35;
+        } else if (keys.d) {
+          pState.rotationY -= steerSpeed * fwdRatio * dt;
+          targetSteer = -0.35;
+        }
       }
+
       currentSteerAngleRef.current = THREE.MathUtils.lerp(
         currentSteerAngleRef.current,
         targetSteer,

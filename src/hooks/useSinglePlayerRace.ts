@@ -12,6 +12,7 @@ import {
   DEFAULT_TRACK_ID,
   getTrack,
 } from "../constants/track";
+import { getPolePosition } from "./useCarPhysics";
 
 export interface UseSinglePlayerRaceOptions {
   userName: string;
@@ -54,26 +55,31 @@ export function useSinglePlayerRace({
   const raceStartRef = useRef<number>(0);
   const countdownTimerRef = useRef<number | null>(null);
 
-  const [player, setPlayer] = useState<Player>({
-    id: "solo_player",
-    name: userName || "Solo Driver",
-    color: userColor,
-    x: 0,
-    y: 0,
-    z: 0,
-    rotationY: 0,
-    speed: 0,
-    driftScore: 0,
-    isDrifting: false,
-    driftMeter: 0,
-    totalDriftScore: 0,
-    checkpoint: 0,
-    lap: 1,
-    finished: false,
-    finishTime: 0,
-    isHost: true,
-    ready: true,
-    place: 1,
+  const initialPole = useMemo(() => getPolePosition(selectedTrack), [selectedTrack]);
+
+  const [player, setPlayer] = useState<Player>(() => {
+    const pole = getPolePosition(selectedTrack);
+    return {
+      id: "solo_player",
+      name: userName || "Solo Driver",
+      color: userColor,
+      x: pole.x,
+      y: pole.y,
+      z: pole.z,
+      rotationY: pole.rotationY,
+      speed: 0,
+      driftScore: 0,
+      isDrifting: false,
+      driftMeter: 0,
+      totalDriftScore: 0,
+      checkpoint: 0,
+      lap: 1,
+      finished: false,
+      finishTime: 0,
+      isHost: true,
+      ready: true,
+      place: 1,
+    };
   });
 
   const [aiDifficulty, setAiDifficulty] = useState<AIDifficulty>("medium");
@@ -108,7 +114,7 @@ export function useSinglePlayerRace({
   const [trafficVehicles, setTrafficVehicles] = useState<TrafficVehicle[]>([]);
 
   const [aiOpponents, setAiOpponents] = useState<Player[]>(() =>
-    createAIPackState(3, "medium").map((s) => s.player)
+    createAIPackState(3, "medium", selectedTrack.curve).map((s) => s.player)
   );
 
   const [aiStandings, setAiStandings] = useState<StandingsResult>({
@@ -200,14 +206,15 @@ export function useSinglePlayerRace({
       countdownTimerRef.current = null;
     }
 
+    const pole = getPolePosition(selectedTrack);
     setPlayer({
       id: "solo_player",
       name: userName.trim() || "Solo Driver",
       color: userColor,
-      x: 0,
-      y: 0,
-      z: 0,
-      rotationY: 0,
+      x: pole.x,
+      y: pole.y,
+      z: pole.z,
+      rotationY: pole.rotationY,
       speed: 0,
       driftScore: 0,
       isDrifting: false,
@@ -222,7 +229,11 @@ export function useSinglePlayerRace({
       place: 1,
     });
 
-    const initialAIPack = createAIPackState(aiOpponentsCount, aiDifficulty);
+    const initialAIPack = createAIPackState(
+      aiOpponentsCount,
+      aiDifficulty,
+      selectedTrack.curve
+    );
     setAiOpponents(initialAIPack.map((s) => s.player));
 
     setCountdown(3);

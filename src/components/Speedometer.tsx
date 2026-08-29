@@ -17,9 +17,10 @@ export default function Speedometer({
   isBoosting = false,
   theme = "dark",
 }: SpeedometerProps) {
-  // Convert speed to positive integer display (clamp reverse negative speed)
-  const displaySpeed = Math.max(0, Math.round(speed));
-  const maxSpeedValue = 100;
+  // Display speed in absolute terms; distinguish reverse gear
+  const isReversing = speed < -0.5;
+  const displaySpeed = Math.round(Math.abs(speed));
+  const maxSpeedValue = isReversing ? 35 : 100;
   
   // Angle calculated from -120 to +120 degrees
   const speedPercentage = Math.min(displaySpeed / maxSpeedValue, 1.0);
@@ -32,7 +33,7 @@ export default function Speedometer({
     }`}>
       {/* Glow Rings */}
       <div className={`absolute inset-1 rounded-full border opacity-20 transition-colors duration-300 ${
-        isBoosting ? "border-indigo-400 bg-indigo-500/5 animate-pulse" : isDrifting ? "border-pink-400 bg-pink-500/5" : isDark ? "border-slate-800" : "border-slate-300"
+        isReversing ? "border-amber-400 bg-amber-500/5" : isBoosting ? "border-indigo-400 bg-indigo-500/5 animate-pulse" : isDrifting ? "border-pink-400 bg-pink-500/5" : isDark ? "border-slate-800" : "border-slate-300"
       }`} />
 
       {/* SVG Dash Indicator dial */}
@@ -55,7 +56,7 @@ export default function Speedometer({
           cy="50"
           r="42"
           fill="transparent"
-          stroke={isBoosting ? "#6366f1" : isDrifting ? "#ec4899" : "#3b82f6"}
+          stroke={isReversing ? "#f59e0b" : isBoosting ? "#6366f1" : isDrifting ? "#ec4899" : "#3b82f6"}
           strokeWidth="4"
           strokeDasharray="180 264"
           strokeDashoffset={180 - (speedPercentage * 180)}
@@ -66,7 +67,9 @@ export default function Speedometer({
 
       {/* Speedometer needle */}
       <div
-        className="absolute w-1 h-14 bg-gradient-to-t from-pink-500 to-indigo-500 origin-bottom bottom-[50%] left-[50%] -translate-x-[50%] transition-transform duration-75 rounded-t-full shadow-lg"
+        className={`absolute w-1 h-14 origin-bottom bottom-[50%] left-[50%] -translate-x-[50%] transition-transform duration-75 rounded-t-full shadow-lg ${
+          isReversing ? "bg-gradient-to-t from-amber-500 to-red-500" : "bg-gradient-to-t from-pink-500 to-indigo-500"
+        }`}
         style={{ transform: `rotate(${needleRotation}deg)` }}
       />
       
@@ -77,20 +80,27 @@ export default function Speedometer({
 
       {/* HUD numerical details overlayed */}
       <div className="relative z-10 flex flex-col items-center justify-center translate-y-[-10px]">
-        {/* Drift bonus alert overlay */}
-        {isDrifting && (
+        {/* Gear / Action Indicator badge */}
+        {isReversing ? (
+          <div className="text-[11px] text-amber-400 font-mono font-black tracking-widest uppercase bg-amber-500/20 px-2 py-0.5 rounded border border-amber-500/40 mb-0.5 animate-pulse">
+            [ REV ]
+          </div>
+        ) : isDrifting ? (
           <div className="text-[10px] text-pink-500 font-mono font-bold tracking-widest uppercase animate-bounce mb-0.5">
             DRIFTING
           </div>
-        )}
-        {isBoosting && (
-          <div className="text-[10px] text-indigo-505 font-mono font-bold tracking-widest uppercase animate-pulse mb-0.5">
+        ) : isBoosting ? (
+          <div className="text-[10px] text-indigo-400 font-mono font-bold tracking-widest uppercase animate-pulse mb-0.5">
             🚀 BOOST
+          </div>
+        ) : (
+          <div className="text-[9px] text-emerald-400 font-mono font-bold tracking-wider uppercase mb-0.5">
+            DRIVE
           </div>
         )}
         
         <span className={`text-3xl font-extrabold tracking-tight font-sans tabular-nums transition-colors ${
-          isDark ? "text-slate-100" : "text-slate-905"
+          isReversing ? "text-amber-300" : isDark ? "text-slate-100" : "text-slate-900"
         }`}>
           {displaySpeed}
         </span>
