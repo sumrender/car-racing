@@ -1,4 +1,20 @@
-import { RotateCcw, LogOut, Sun, Moon, Play, X, Settings2, AlertTriangle, Car } from "lucide-react";
+import {
+  RotateCcw,
+  LogOut,
+  Sun,
+  Moon,
+  Play,
+  X,
+  Settings2,
+  AlertTriangle,
+  Car,
+  Volume2,
+  VolumeX,
+  Volume1,
+  Sliders,
+  Zap,
+} from "lucide-react";
+import { useSoundManager } from "../hooks/useSoundManager";
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -27,6 +43,17 @@ export default function SettingsModal({
   trafficCount,
   onTrafficCountChange,
 }: SettingsModalProps) {
+  const {
+    isMuted,
+    masterVolume,
+    sfxVolume,
+    engineVolume,
+    toggleMute,
+    setMasterVolume,
+    setSfxVolume,
+    setEngineVolume,
+  } = useSoundManager();
+
   if (!isOpen) return null;
 
   return (
@@ -41,7 +68,7 @@ export default function SettingsModal({
     >
       <div
         id="settings-pause-modal-card"
-        className={`w-full max-w-md rounded-2xl border p-6 sm:p-7 shadow-2xl transition-all relative overflow-hidden select-none ${
+        className={`w-full max-w-md max-h-[90vh] flex flex-col rounded-2xl border p-6 sm:p-7 shadow-2xl transition-all relative overflow-hidden select-none ${
           theme === "dark"
             ? "bg-slate-900/95 border-slate-700/80 text-white shadow-cyan-950/30"
             : "bg-white/95 border-slate-200 text-slate-900 shadow-slate-300/50"
@@ -51,7 +78,7 @@ export default function SettingsModal({
         <div className="absolute top-0 inset-x-0 h-1 bg-gradient-to-r from-pink-500 via-indigo-500 to-cyan-400" />
 
         {/* Modal Header */}
-        <div className="flex items-center justify-between pb-4 mb-5 border-b border-slate-200 dark:border-slate-800/80">
+        <div className="flex items-center justify-between pb-4 mb-4 border-b border-slate-200 dark:border-slate-800/80 shrink-0">
           <div className="flex items-center gap-2.5">
             <div className="w-8 h-8 rounded-lg bg-indigo-500/10 border border-indigo-500/30 flex items-center justify-center text-indigo-400">
               <Settings2 className="w-4 h-4" />
@@ -76,8 +103,8 @@ export default function SettingsModal({
           </button>
         </div>
 
-        {/* Settings & Actions List */}
-        <div className="space-y-3">
+        {/* Settings & Actions Scrollable List */}
+        <div className="space-y-3 overflow-y-auto pr-1">
           {/* Resume button */}
           <button
             id="settings-resume-btn"
@@ -100,7 +127,7 @@ export default function SettingsModal({
               onRestart();
               onClose();
             }}
-            className={`w-full py-3.5 px-4 rounded-xl font-mono text-xs font-bold transition-all flex items-center justify-between border active:scale-[0.99] ${
+            className={`w-full py-3 px-4 rounded-xl font-mono text-xs font-bold transition-all flex items-center justify-between border active:scale-[0.99] ${
               theme === "dark"
                 ? "bg-slate-800/80 hover:bg-slate-700/80 text-slate-200 border-slate-700 hover:border-slate-600"
                 : "bg-slate-100 hover:bg-slate-200/90 text-slate-800 border-slate-200 hover:border-slate-300"
@@ -114,6 +141,100 @@ export default function SettingsModal({
               {isMultiplayer ? "New Round" : "Reset Lap & Timer"}
             </span>
           </button>
+
+          {/* Sound Manager Audio Mixing Controls */}
+          <div
+            id="settings-audio-mixing-card"
+            className={`w-full py-3 px-4 rounded-xl border flex flex-col gap-3 transition-colors ${
+              theme === "dark"
+                ? "bg-slate-800/50 border-slate-700/70"
+                : "bg-slate-50 border-slate-200"
+            }`}
+          >
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className={`p-1.5 rounded-lg ${isMuted ? "bg-red-500/10 text-red-400" : "bg-cyan-500/10 text-cyan-400"}`}>
+                  {isMuted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
+                </div>
+                <div className="text-left">
+                  <div className="font-mono text-xs font-bold">Sound & Audio Mixing</div>
+                  <div className="text-[10px] font-sans text-slate-400">
+                    {isMuted ? "Audio muted" : "Web Audio SFX Engine active"}
+                  </div>
+                </div>
+              </div>
+
+              <button
+                id="settings-toggle-mute-btn"
+                onClick={toggleMute}
+                className={`px-2.5 py-1 rounded-lg font-mono text-[11px] font-bold border transition ${
+                  isMuted
+                    ? "bg-red-500/20 text-red-300 border-red-500/40 hover:bg-red-500/30"
+                    : "bg-cyan-500/20 text-cyan-300 border-cyan-500/40 hover:bg-cyan-500/30"
+                }`}
+              >
+                {isMuted ? "UNMUTE" : "MUTE"}
+              </button>
+            </div>
+
+            {!isMuted && (
+              <div className="space-y-2.5 pt-1 border-t border-slate-200 dark:border-slate-700/50">
+                {/* Master Volume */}
+                <div className="flex items-center justify-between gap-3 text-[11px] font-mono">
+                  <span className="text-slate-400 w-24">Master Vol:</span>
+                  <input
+                    id="settings-master-volume-slider"
+                    type="range"
+                    min="0"
+                    max="1"
+                    step="0.05"
+                    value={masterVolume}
+                    onChange={(e) => setMasterVolume(parseFloat(e.target.value))}
+                    className="flex-1 accent-indigo-500 h-1.5 bg-slate-700 rounded-lg cursor-pointer"
+                  />
+                  <span className="text-indigo-400 font-bold w-10 text-right">
+                    {Math.round(masterVolume * 100)}%
+                  </span>
+                </div>
+
+                {/* SFX Volume */}
+                <div className="flex items-center justify-between gap-3 text-[11px] font-mono">
+                  <span className="text-slate-400 w-24">SFX & Jumps:</span>
+                  <input
+                    id="settings-sfx-volume-slider"
+                    type="range"
+                    min="0"
+                    max="1"
+                    step="0.05"
+                    value={sfxVolume}
+                    onChange={(e) => setSfxVolume(parseFloat(e.target.value))}
+                    className="flex-1 accent-cyan-500 h-1.5 bg-slate-700 rounded-lg cursor-pointer"
+                  />
+                  <span className="text-cyan-400 font-bold w-10 text-right">
+                    {Math.round(sfxVolume * 100)}%
+                  </span>
+                </div>
+
+                {/* Engine / Nitro Volume */}
+                <div className="flex items-center justify-between gap-3 text-[11px] font-mono">
+                  <span className="text-slate-400 w-24">Nitro / Core:</span>
+                  <input
+                    id="settings-engine-volume-slider"
+                    type="range"
+                    min="0"
+                    max="1"
+                    step="0.05"
+                    value={engineVolume}
+                    onChange={(e) => setEngineVolume(parseFloat(e.target.value))}
+                    className="flex-1 accent-pink-500 h-1.5 bg-slate-700 rounded-lg cursor-pointer"
+                  />
+                  <span className="text-pink-400 font-bold w-10 text-right">
+                    {Math.round(engineVolume * 100)}%
+                  </span>
+                </div>
+              </div>
+            )}
+          </div>
 
           {/* Dark Mode Toggle Switch Card */}
           <div
@@ -261,7 +382,7 @@ export default function SettingsModal({
               onExit();
               onClose();
             }}
-            className={`w-full py-3.5 px-4 rounded-xl font-mono text-xs font-bold transition-all flex items-center justify-between border active:scale-[0.99] ${
+            className={`w-full py-3 px-4 rounded-xl font-mono text-xs font-bold transition-all flex items-center justify-between border active:scale-[0.99] ${
               theme === "dark"
                 ? "bg-red-950/30 hover:bg-red-900/50 text-red-300 border-red-900/50 hover:border-red-700/60"
                 : "bg-red-50 hover:bg-red-100 text-red-600 border-red-200 hover:border-red-300"
@@ -278,7 +399,7 @@ export default function SettingsModal({
         </div>
 
         {/* Footer controls reminder */}
-        <div className="mt-5 pt-3.5 border-t border-slate-200 dark:border-slate-800/80 flex items-center justify-between text-[10px] font-mono text-slate-400 dark:text-slate-400">
+        <div className="mt-4 pt-3 border-t border-slate-200 dark:border-slate-800/80 flex items-center justify-between text-[10px] font-mono text-slate-400 dark:text-slate-400 shrink-0">
           <span>Press <strong>ESC</strong> to close</span>
           <span>DRIFT ARENA 3D</span>
         </div>
@@ -286,3 +407,4 @@ export default function SettingsModal({
     </div>
   );
 }
+

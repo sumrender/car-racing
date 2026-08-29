@@ -1,15 +1,7 @@
 import { useEffect, useRef } from "react";
 import * as THREE from "three";
 import { Player, TrafficVehicle } from "../types";
-import {
-  startNitroAudio,
-  stopNitroAudio,
-  warmUpAudioEngine,
-  playCollisionSound,
-  playJumpSound,
-  playLandingSound,
-  playSpeedBumpRumble,
-} from "../utils/audio";
+import { ISoundManager, getSoundManager } from "../utils/soundManager";
 import { resolveCarCollisions, CarCollisionEntity } from "../utils/carCollision";
 import {
   generateSpeedBreakers,
@@ -35,11 +27,12 @@ import {
   TRACK_POINTS,
   TRACK_CURVE,
   ROAD_WIDTH,
-  CHECKPOINT_COUNT,
   checkOnRoad,
 } from "../constants/track";
 import { createCarMesh } from "../utils/carMeshBuilder";
 import { buildTrackSceneComponents } from "../utils/trackMeshBuilder";
+import { useCarPhysics } from "../hooks/useCarPhysics";
+import { useRaceCamera } from "../hooks/useRaceCamera";
 
 interface RaceCanvasProps {
   localPlayer: Player;
@@ -54,6 +47,7 @@ interface RaceCanvasProps {
   aiColor?: string;
   speedBreakersCount?: number;
   trafficCount?: number;
+  soundManager?: ISoundManager;
   onAIOpponentUpdate?: (ai: Player, standings: StandingsResult) => void;
   onAIPackUpdate?: (aiPack: Player[], standings: StandingsResult) => void;
   onTrafficUpdate?: (vehicles: TrafficVehicle[]) => void;
@@ -70,12 +64,19 @@ export default function RaceCanvas({
   aiCount = 1,
   speedBreakersCount = 4,
   trafficCount = 8,
+  soundManager,
   onAIOpponentUpdate,
   onAIPackUpdate,
   onTrafficUpdate,
 }: RaceCanvasProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  const soundRef = useRef<ISoundManager>(soundManager || getSoundManager());
+
+  useEffect(() => {
+    soundRef.current = soundManager || getSoundManager();
+  }, [soundManager]);
 
   const nitroOverlayRef = useRef<HTMLDivElement>(null);
   const jumpOverlayRef = useRef<HTMLDivElement>(null);
@@ -94,15 +95,26 @@ export default function RaceCanvas({
   const trafficCountRef = useRef<number>(trafficCount);
   const trafficVehiclesRef = useRef<TrafficVehicle[]>([]);
 
-  const playerJumpStateRef = useRef<CarJumpState>({
-    y: 0,
-    vy: 0,
-    pitch: 0,
-    isAirborne: false,
-    airTime: 0,
-    lastBreakerId: null,
-    lastBreakerCooldown: 0,
+  const {
+    carStateRef,
+    jumpStateRef: playerJumpStateRef,
+    keysRef,
+    resetPhysics,
+    stepPhysics,
+  } = useCarPhysics({
+    nitroOverlayRef,
+    jumpOverlayRef,
+    jumpAltitudeTextRef,
+    soundManager: soundRef.current,
+    onFinish: (finishTime) => {
+      onUpdateStateRef.current({
+        finished: true,
+        finishTime,
+      });
+    },
   });
+
+  const { updateCamera } = useRaceCamera();
 
   const aiJumpStatesRef = useRef<CarJumpState[]>([]);
 
@@ -157,113 +169,12 @@ export default function RaceCanvas({
     onTrafficUpdateRef.current = onTrafficUpdate;
   }, [onTrafficUpdate]);
 
-  // Input states ref
-  const keysRef = useRef<{
-    w: boolean;
-    s: boolean;
-    a: boolean;
-    d: boolean;
-    space: boolean;
-    r: boolean;
-  }>({
-    w: false,
-    s: false,
-    a: false,
-    d: false,
-    space: false,
-    r: false,
-  });
-
-  // Physics state refs to keep it running smoothly at 60fps
-  const carStateRef = useRef({
-    x: 0,
-    y: 0,
-    z: 0,
-    rotationY: 0, // Starting facing forward along the straightaway (aligned with +Z)
-    speed: 0,
-    driftScore: 0,
-    isDrifting: false,
-    driftAngle: 0,
-    driftMeter: 0,
-    totalDriftScore: 0,
-    checkpoint: 0,
-    lap: 1,
-    finished: false,
-    boostTimer: 0,
-    offRoadCoeff: 1,
-    lastCheckpointIndex: 0,
-  });
-
-  // Track key actions (Zero React re-render overhead for nitro boost)
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      warmUpAudioEngine();
-      const key = e.key.toLowerCase();
-      if (key === "w" || e.key === "ArrowUp") keysRef.current.w = true;
-      if (key === "s" || e.key === "ArrowDown") keysRef.current.s = true;
-      if (key === "a" || e.key === "ArrowLeft") keysRef.current.a = true;
-      if (key === "d" || e.key === "ArrowRight") keysRef.current.d = true;
-      if (e.key === " " || e.code === "Space") {
-        if (!keysRef.current.space) {
-          startNitroAudio();
-          if (nitroOverlayRef.current) {
-            nitroOverlayRef.current.style.opacity = "1";
-          }
-        }
-        keysRef.current.space = true;
-      }
-      if (key === "r") keysRef.current.r = true;
-    };
-
-    const handleKeyUp = (e: KeyboardEvent) => {
-      const key = e.key.toLowerCase();
-      if (key === "w" || e.key === "ArrowUp") keysRef.current.w = false;
-      if (key === "s" || e.key === "ArrowDown") keysRef.current.s = false;
-      if (key === "a" || e.key === "ArrowLeft") keysRef.current.a = false;
-      if (key === "d" || e.key === "ArrowRight") keysRef.current.d = false;
-      if (e.key === " " || e.code === "Space") {
-        keysRef.current.space = false;
-        stopNitroAudio();
-        if (nitroOverlayRef.current) {
-          nitroOverlayRef.current.style.opacity = "0";
-        }
-      }
-      if (key === "r") keysRef.current.r = false;
-    };
-
-    window.addEventListener("keydown", handleKeyDown);
-    window.addEventListener("keyup", handleKeyUp);
-
-    return () => {
-      window.removeEventListener("keydown", handleKeyDown);
-      window.removeEventListener("keyup", handleKeyUp);
-      stopNitroAudio();
-    };
-  }, []);
-
   // Sync state triggers from props (for lobby/game starts, resets)
   useEffect(() => {
     if (activeRoomStatus === "countdown") {
-      carStateRef.current = {
-        x: 0,
-        y: 0,
-        z: 0,
-        rotationY: 0,
-        speed: 0,
-        driftScore: 0,
-        isDrifting: false,
-        driftAngle: 0,
-        driftMeter: 0,
-        totalDriftScore: 0,
-        checkpoint: 0,
-        lap: 1,
-        finished: false,
-        boostTimer: 0,
-        offRoadCoeff: 1,
-        lastCheckpointIndex: 0,
-      };
+      resetPhysics();
     }
-  }, [activeRoomStatus]);
+  }, [activeRoomStatus, resetPhysics]);
 
   // Main Three.js setup & game loop
   useEffect(() => {
@@ -460,8 +371,6 @@ export default function RaceCanvas({
 
     let lastTime = performance.now();
     let networkSendTimer = 0;
-    let currentSteerAngle = 0;
-    let nitroExhaustTimer = 0;
 
     const gameLoop = (currentTime: number) => {
       const dt = Math.min((currentTime - lastTime) / 1000, 0.1);
@@ -646,279 +555,10 @@ export default function RaceCanvas({
       }
 
       // 2. RUN LOCAL CAR DRIVING PHYSICS
-      if (activeRoomStatusRef.current === "racing" && !pState.finished) {
-        const localPos = new THREE.Vector3(pState.x, pState.y, pState.z);
-        const roadCheck = checkOnRoad(localPos);
-        const maxAllowedDist = ROAD_WIDTH / 2 - 1.8;
-
-        if (roadCheck.distance > maxAllowedDist) {
-          const toCar = localPos.clone().sub(roadCheck.closestPt);
-          toCar.y = 0;
-          toCar.normalize();
-
-          const correctedPos = roadCheck.closestPt.clone().add(toCar.multiplyScalar(maxAllowedDist));
-          pState.x = correctedPos.x;
-          pState.z = correctedPos.z;
-
-          pState.speed = Math.max(pState.speed * 0.96, 18);
-
-          if (pState.isDrifting) {
-            pState.isDrifting = false;
-            pState.driftScore = 0;
-            pState.driftMeter = 0;
-          }
-
-          if (Math.random() < 0.6) {
-            const sparkDir = new THREE.Vector3(
-              Math.sin(pState.rotationY) + (Math.random() - 0.5),
-              0.5 + Math.random(),
-              Math.cos(pState.rotationY) + (Math.random() - 0.5)
-            ).normalize();
-            spawnDust(correctedPos, sparkDir, "#ef4444");
-          }
-        }
-
-        if (keys.space && activeRoomStatusRef.current === "racing") {
-          pState.boostTimer = Math.max(pState.boostTimer, 0.4);
-        } else if (pState.boostTimer > 0) {
-          pState.boostTimer -= dt;
-          if (pState.boostTimer <= 0) pState.boostTimer = 0;
-        }
-
-        const targetMaxSpeed = pState.boostTimer > 0 ? 105 : 62;
-        const accelRate = 22.0;
-        const nitroAccelRate = 45.0;
-        const brakeRate = 33.0;
-        const frictionRate = 6.0;
-
-        if (keys.space || pState.boostTimer > 0) {
-          if (pState.speed < targetMaxSpeed) {
-            pState.speed += nitroAccelRate * dt;
-          } else {
-            pState.speed -= Math.min(nitroAccelRate * 0.5 * dt, pState.speed - targetMaxSpeed);
-          }
-
-          nitroExhaustTimer += dt;
-          if (nitroExhaustTimer >= 0.04) {
-            nitroExhaustTimer = 0;
-            const rotCos = Math.sin(pState.rotationY);
-            const rotSin = Math.cos(pState.rotationY);
-            const leftExhaust = localPos
-              .clone()
-              .add(new THREE.Vector3(-rotCos * 2.8 - 0.6, 0.35, -rotSin * 2.8));
-            const rightExhaust = localPos
-              .clone()
-              .add(new THREE.Vector3(-rotCos * 2.8 + 0.6, 0.35, -rotSin * 2.8));
-            spawnDust(leftExhaust, new THREE.Vector3(-rotCos * 3.5, 0.6, -rotSin * 3.5), "#06b6d4");
-            spawnDust(rightExhaust, new THREE.Vector3(-rotCos * 3.5, 0.6, -rotSin * 3.5), "#06b6d4");
-          }
-        } else if (keys.w) {
-          if (pState.speed < targetMaxSpeed) {
-            pState.speed += accelRate * dt;
-          } else {
-            pState.speed -= Math.min(accelRate * 0.5 * dt, pState.speed - targetMaxSpeed);
-          }
-        } else if (keys.s) {
-          if (pState.speed > -20) {
-            pState.speed -= brakeRate * dt;
-          }
-        } else {
-          if (!playerJumpStateRef.current.isAirborne) {
-            if (pState.speed > 0) {
-              pState.speed -= frictionRate * dt;
-              if (pState.speed < 0) pState.speed = 0;
-            } else if (pState.speed < 0) {
-              pState.speed += frictionRate * dt;
-              if (pState.speed > 0) pState.speed = 0;
-            }
-          }
-        }
-
-        const steerSpeed = 1.35;
-        const speedRatio = Math.min(Math.abs(pState.speed) / 45, 1.3);
-
-        let targetSteer = 0;
-        if (keys.a) {
-          pState.rotationY += steerSpeed * speedRatio * dt;
-          targetSteer = 0.35;
-        } else if (keys.d) {
-          pState.rotationY -= steerSpeed * speedRatio * dt;
-          targetSteer = -0.35;
-        }
-        currentSteerAngle = THREE.MathUtils.lerp(
-          currentSteerAngle,
-          targetSteer,
-          Math.min(14 * dt, 1)
-        );
-
-        const fl = playerCar.getObjectByName("frontLeft") as THREE.Group;
-        const fr = playerCar.getObjectByName("frontRight") as THREE.Group;
-        if (fl) fl.rotation.y = currentSteerAngle;
-        if (fr) fr.rotation.y = currentSteerAngle;
-
-        const canDrift = Math.abs(pState.speed) > 28;
-        const isSteering = keys.a || keys.d;
-
-        if (canDrift && isSteering) {
-          if (!pState.isDrifting) {
-            pState.isDrifting = true;
-          }
-
-          const driftRate = 0.8;
-          const targetDriftAngle = keys.a ? 0.38 : -0.38;
-          pState.driftAngle = THREE.MathUtils.lerp(
-            pState.driftAngle,
-            targetDriftAngle,
-            driftRate * dt * 5
-          );
-
-          const scoreDelta = Math.round(
-            Math.abs(pState.speed) * Math.abs(pState.driftAngle) * 5 * dt
-          );
-          pState.driftScore += scoreDelta;
-          pState.driftMeter = Math.min(pState.driftMeter + scoreDelta * 0.4, 100);
-
-          if (Math.random() < 0.4) {
-            const rotCos = Math.sin(pState.rotationY);
-            const rotSin = Math.cos(pState.rotationY);
-            const exhaustPos = localPos
-              .clone()
-              .add(new THREE.Vector3(-rotCos * 2.5, 0.4, -rotSin * 2.5));
-            spawnDust(exhaustPos, new THREE.Vector3(-rotCos * 3, 1.2, -rotSin * 3), "#ec4899");
-          }
-        } else {
-          if (pState.isDrifting) {
-            pState.isDrifting = false;
-
-            if (pState.driftScore > 100) {
-              pState.boostTimer = 1.6;
-              pState.totalDriftScore += pState.driftScore;
-            }
-            pState.driftScore = 0;
-            pState.driftMeter = 0;
-          }
-          pState.driftAngle = THREE.MathUtils.lerp(pState.driftAngle, 0, 8 * dt);
-        }
-
-        const driveAngle = pState.rotationY - pState.driftAngle * 0.7;
-        const dx = Math.sin(driveAngle) * pState.speed * dt;
-        const dz = Math.cos(driveAngle) * pState.speed * dt;
-
-        pState.x += dx;
-        pState.z += dz;
-
-        // SPEED BREAKER JUMP PHYSICS
-        const jumpResult = updateCarSpeedBreakerPhysics(
-          { x: pState.x, y: pState.y, z: pState.z },
-          pState.speed,
-          dt,
-          playerJumpStateRef.current,
-          speedBreakersRef.current
-        );
-
-        pState.y = jumpResult.y;
-        if (jumpResult.landingSpeedDampening < 1.0) {
-          pState.speed *= jumpResult.landingSpeedDampening;
-        }
-
-        if (jumpResult.justLaunched) {
-          playJumpSound(Math.min(Math.abs(pState.speed) / 75, 1.0));
-        }
-
-        if (jumpResult.justLanded) {
-          playLandingSound(Math.min(Math.abs(pState.speed) / 60, 1.0));
-          const carPos = new THREE.Vector3(pState.x, 0, pState.z);
-          const rotCos = Math.sin(pState.rotationY);
-          const rotSin = Math.cos(pState.rotationY);
-          const t1 = carPos
-            .clone()
-            .add(new THREE.Vector3(-rotSin * 1.1 + rotCos * 1.5, 0.1, rotCos * 1.1 + rotSin * 1.5));
-          const t2 = carPos
-            .clone()
-            .add(new THREE.Vector3(rotSin * 1.1 + rotCos * 1.5, 0.1, -rotCos * 1.1 + rotSin * 1.5));
-          const t3 = carPos
-            .clone()
-            .add(new THREE.Vector3(-rotSin * 1.1 - rotCos * 1.5, 0.1, rotCos * 1.1 - rotSin * 1.5));
-          const t4 = carPos
-            .clone()
-            .add(new THREE.Vector3(rotSin * 1.1 - rotCos * 1.5, 0.1, -rotCos * 1.1 - rotSin * 1.5));
-          [t1, t2, t3, t4].forEach((tp) => {
-            spawnDust(
-              tp,
-              new THREE.Vector3(
-                (Math.random() - 0.5) * 3,
-                0.8 + Math.random(),
-                (Math.random() - 0.5) * 3
-              ),
-              "#f59e0b"
-            );
-            spawnDust(
-              tp,
-              new THREE.Vector3((Math.random() - 0.5) * 2, 0.5, (Math.random() - 0.5) * 2),
-              "#94a3b8"
-            );
-          });
-        }
-
-        if (jumpResult.hitRumble) {
-          playSpeedBumpRumble(0.5);
-        }
-
-        if (jumpOverlayRef.current) {
-          if (jumpResult.isAirborne && jumpResult.y > 0.28) {
-            jumpOverlayRef.current.style.opacity = "1";
-            jumpOverlayRef.current.style.transform = "translate(-50%, 0) scale(1)";
-            if (jumpAltitudeTextRef.current) {
-              jumpAltitudeTextRef.current.textContent = `+${jumpResult.y.toFixed(1)}m`;
-            }
-          } else {
-            jumpOverlayRef.current.style.opacity = "0";
-            jumpOverlayRef.current.style.transform = "translate(-50%, -10px) scale(0.95)";
-          }
-        }
-
-        if (keys.r) {
-          const checkU = pState.checkpoint / CHECKPOINT_COUNT;
-          const checkpointPt = TRACK_CURVE.getPointAt(checkU);
-          pState.x = checkpointPt.x;
-          pState.y = checkpointPt.y;
-          pState.z = checkpointPt.z;
-          const tangent = TRACK_CURVE.getTangentAt(checkU);
-          pState.rotationY = Math.atan2(tangent.x, tangent.z);
-          pState.speed = 0;
-          pState.driftScore = 0;
-          pState.driftMeter = 0;
-          pState.isDrifting = false;
-        }
-
-        const currentU = roadCheck.u;
-        const checkpointTolerance = 0.08;
-
-        for (let cp = 0; cp < CHECKPOINT_COUNT; cp++) {
-          const targetU = cp / CHECKPOINT_COUNT;
-          const diffU = Math.min(Math.abs(currentU - targetU), 1.0 - Math.abs(currentU - targetU));
-
-          if (diffU < checkpointTolerance) {
-            const nextExpected = (pState.checkpoint + 1) % CHECKPOINT_COUNT;
-
-            if (cp === nextExpected) {
-              pState.checkpoint = cp;
-
-              if (cp === 0) {
-                pState.lap += 1;
-                if (pState.lap > 3) {
-                  pState.finished = true;
-                  pState.speed = 0;
-                  onUpdateStateRef.current({
-                    finished: true,
-                    finishTime: Date.now() - (window as any).raceStartTime,
-                  });
-                }
-              }
-            }
-          }
-        }
-      }
+      stepPhysics(dt, activeRoomStatusRef.current, speedBreakersRef.current, {
+        playerCar,
+        spawnDust,
+      });
 
       // 3. MULTI-CAR PHYSICAL COLLISION RESOLUTION
       if (
@@ -985,7 +625,7 @@ export default function RaceCanvas({
 
         resolveCarCollisions(carEntities, (event) => {
           if (event.involvesLocalPlayer) {
-            playCollisionSound(Math.min(event.intensity / 18, 1.0));
+            soundRef.current.playCollision(Math.min(event.intensity / 18, 1.0));
             spawnDust(
               event.contactPoint,
               new THREE.Vector3(
@@ -1193,39 +833,20 @@ export default function RaceCanvas({
       }
 
       // CAMERA ACTIONS
-      const rotCos = Math.sin(pState.rotationY);
-      const rotSin = Math.cos(pState.rotationY);
-
-      const targetFOV = isBoostingActive ? (keys.space ? 68 : 64) : 60;
-      if (Math.abs(camera.fov - targetFOV) > 0.05) {
-        camera.fov = THREE.MathUtils.lerp(camera.fov, targetFOV, 5.0 * dt);
-        camera.updateProjectionMatrix();
-      }
-
-      const targetCamDistance = isBoostingActive ? 16.8 : 16;
-      const targetCamHeight = isBoostingActive ? 5.0 : 5.2;
-
-      const idealCamX = pState.x - rotCos * targetCamDistance;
-      const idealCamY = pState.y + targetCamHeight;
-      const idealCamZ = pState.z - rotSin * targetCamDistance;
-
-      camera.position.x = THREE.MathUtils.lerp(camera.position.x, idealCamX, 6.5 * dt);
-      camera.position.y = THREE.MathUtils.lerp(camera.position.y, idealCamY, 6.5 * dt);
-      camera.position.z = THREE.MathUtils.lerp(camera.position.z, idealCamZ, 6.5 * dt);
-
-      if (isBoostingActive && pState.speed > 40) {
-        const speedRatio = Math.min(pState.speed, 105) / 105;
-        const shakeOffset = 0.025 * speedRatio;
-        camera.position.x += Math.sin(currentTime * 0.04) * shakeOffset;
-        camera.position.y += Math.cos(currentTime * 0.05) * (shakeOffset * 0.5);
-      }
-
-      const lookAhead = new THREE.Vector3(
-        pState.x + rotCos * 5,
-        pState.y + 0.5,
-        pState.z + rotSin * 5
+      updateCamera(
+        camera,
+        {
+          x: pState.x,
+          y: pState.y,
+          z: pState.z,
+          rotationY: pState.rotationY,
+          speed: pState.speed,
+        },
+        dt,
+        currentTime,
+        isBoostingActive,
+        keys.space
       );
-      camera.lookAt(lookAhead);
 
       renderer.render(scene, camera);
 

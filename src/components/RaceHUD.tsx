@@ -1,7 +1,8 @@
-import { Settings, RotateCcw, LogOut, Sun, Moon, Flag, Award, Car } from "lucide-react";
+import { Settings, RotateCcw, LogOut, Sun, Moon, Flag, Award, Car, Volume2, VolumeX } from "lucide-react";
 import { Player, TrafficVehicle } from "../types";
 import { formatTime } from "../utils/time";
 import { ThemeMode } from "../hooks/useTheme";
+import { useSoundManager } from "../hooks/useSoundManager";
 import Speedometer from "./Speedometer";
 import Minimap from "./Minimap";
 
@@ -64,6 +65,7 @@ export default function RaceHUD({
   trafficCount,
   trafficVehicles,
 }: RaceHUDProps) {
+  const { isMuted, toggleMute } = useSoundManager();
   const isDark = theme === "dark";
   const activeTraffic = trafficVehicles || traffic;
   const displayTrafficCount = trafficCount !== undefined ? trafficCount : activeTraffic.length;
@@ -196,6 +198,21 @@ export default function RaceHUD({
           </div>
 
           {/* Quick Action Buttons */}
+          <button
+            id="hud-mute-toggle-btn"
+            onClick={toggleMute}
+            className={`p-2 sm:p-2.5 rounded-xl border backdrop-blur-md shadow-lg transition-all ${
+              isMuted
+                ? "bg-red-950/80 border-red-800/80 text-red-400 hover:bg-red-900/80"
+                : isDark
+                ? "bg-slate-950/85 border-slate-800 text-cyan-400 hover:bg-slate-800"
+                : "bg-white/95 border-slate-200 text-cyan-600 hover:bg-slate-100 shadow"
+            }`}
+            title={isMuted ? "Unmute Audio" : "Mute Audio"}
+          >
+            {isMuted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
+          </button>
+
           <button
             id="hud-theme-toggle-btn"
             onClick={onToggleTheme}
