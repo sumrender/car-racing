@@ -4,12 +4,15 @@ import { ThemeMode } from "../../hooks/useTheme";
 import { AIDifficulty, AI_DIFFICULTIES } from "../../utils/aiOpponent";
 import { TRAFFIC_PRESETS } from "../../utils/trafficSystem";
 import ColorPicker from "../ColorPicker";
+import TrackSelector from "../TrackSelector";
 
 interface SinglePlayerSetupViewProps {
   userName: string;
   onUserNameChange: (name: string) => void;
   userColor: string;
   onUserColorChange: (color: string) => void;
+  selectedTrackId: string;
+  onSelectTrack: (trackId: string) => void;
   aiDifficulty: AIDifficulty;
   onAiDifficultyChange: (diff: AIDifficulty) => void;
   aiOpponentsCount: number;
@@ -28,6 +31,8 @@ export default function SinglePlayerSetupView({
   onUserNameChange,
   userColor,
   onUserColorChange,
+  selectedTrackId,
+  onSelectTrack,
   aiDifficulty,
   onAiDifficultyChange,
   aiOpponentsCount,
@@ -79,7 +84,7 @@ export default function SinglePlayerSetupView({
               isDark ? "text-slate-400" : "text-slate-500"
             }`}
           >
-            Customize your racer, tune rival AI telemetry, configure highway traffic, and place track obstacles.
+            Select your track, customize your racer, tune rival AI telemetry, configure highway traffic, and place obstacles.
           </p>
         </header>
 
@@ -90,6 +95,13 @@ export default function SinglePlayerSetupView({
           }}
           className="space-y-5"
         >
+          {/* Track Selection */}
+          <TrackSelector
+            selectedTrackId={selectedTrackId}
+            onSelectTrack={onSelectTrack}
+            theme={theme}
+          />
+
           {/* Driver Nickname Input */}
           <div className="flex flex-col gap-1 text-left">
             <label

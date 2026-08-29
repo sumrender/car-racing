@@ -1,14 +1,16 @@
-import { Trophy, RotateCcw, ArrowRight, Flag, Award, Clock } from "lucide-react";
+import { Trophy, RotateCcw, ArrowRight, Flag, Award, Clock, Compass } from "lucide-react";
 import { Player } from "../../types";
 import { formatTime } from "../../utils/time";
 import { ThemeMode } from "../../hooks/useTheme";
 import { StandingsResult } from "../../utils/aiOpponent";
+import { TrackConfig } from "../../constants/track";
 
 interface SinglePlayerResultsViewProps {
   player: Player;
   aiOpponents: Player[];
   standings: StandingsResult;
   bestTime: number | null;
+  track?: TrackConfig;
   onRestart: () => void;
   onBackToSetup: () => void;
   onExitToMenu: () => void;
@@ -20,6 +22,7 @@ export default function SinglePlayerResultsView({
   aiOpponents,
   standings,
   bestTime,
+  track,
   onRestart,
   onBackToSetup,
   onExitToMenu,
@@ -86,9 +89,24 @@ export default function SinglePlayerResultsView({
           <h1 className="text-2xl sm:text-3xl font-black font-sans uppercase tracking-tight">
             {isWinner ? "VICTORY! 1ST PLACE" : `RACE FINISHED - P${place}`}
           </h1>
-          <p className="text-xs font-mono opacity-70 mt-1 uppercase tracking-wider">
-            {isWinner ? "You conquered the Drift Arena Grid" : "Great drift control & lap execution"}
-          </p>
+          <div className="flex items-center gap-2 mt-1">
+            <p className="text-xs font-mono opacity-70 uppercase tracking-wider">
+              {isWinner ? "You conquered the Grid" : "Great drift control & lap execution"}
+            </p>
+            {track && (
+              <span
+                className="text-[10px] font-mono font-bold uppercase px-2 py-0.5 rounded-full border flex items-center gap-1"
+                style={{
+                  color: track.themeColor,
+                  borderColor: `${track.themeColor}50`,
+                  backgroundColor: `${track.themeColor}15`,
+                }}
+              >
+                <Compass className="w-3 h-3" />
+                {track.name}
+              </span>
+            )}
+          </div>
         </header>
 
         {/* Highlight Stats Grid */}

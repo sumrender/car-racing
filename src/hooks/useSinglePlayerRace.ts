@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { Player, TrafficVehicle } from "../types";
 import {
   AIDifficulty,
@@ -7,6 +7,11 @@ import {
 } from "../utils/aiOpponent";
 import { useRaceTimer } from "./useRaceTimer";
 import { warmUpAudioEngine } from "../utils/audio";
+import {
+  TrackConfig,
+  DEFAULT_TRACK_ID,
+  getTrack,
+} from "../constants/track";
 
 export interface UseSinglePlayerRaceOptions {
   userName: string;
@@ -22,9 +27,19 @@ export function useSinglePlayerRace({
   const [status, setStatus] = useState<SinglePlayerStatus>("setup");
   const [isPaused, setIsPaused] = useState<boolean>(false);
   const [countdown, setCountdown] = useState(3);
+  const [selectedTrackId, setSelectedTrackIdState] = useState<string>(() => {
+    const saved = localStorage.getItem("racer_selected_track");
+    if (saved && getTrack(saved)) return saved;
+    return DEFAULT_TRACK_ID;
+  });
+
+  const selectedTrack = useMemo(() => getTrack(selectedTrackId), [selectedTrackId]);
+
   const [bestTime, setBestTime] = useState<number | null>(() => {
-    const saved = localStorage.getItem("racer_solo_best");
-    return saved ? parseInt(saved, 10) : null;
+    const saved = localStorage.getItem(`racer_solo_best_${selectedTrackId}`);
+    if (saved) return parseInt(saved, 10);
+    const legacy = localStorage.getItem("racer_solo_best");
+    return legacy ? parseInt(legacy, 10) : null;
   });
 
   const {
@@ -108,6 +123,13 @@ export function useSinglePlayerRace({
     aiProgress: 0,
     allStandings: [],
   });
+
+  const setSelectedTrackId = useCallback((trackId: string) => {
+    setSelectedTrackIdState(trackId);
+    localStorage.setItem("racer_selected_track", trackId);
+    const savedBest = localStorage.getItem(`racer_solo_best_${trackId}`);
+    setBestTime(savedBest ? parseInt(savedBest, 10) : null);
+  }, []);
 
   // Sync profile name and color when in setup
   useEffect(() => {
@@ -245,7 +267,7 @@ export function useSinglePlayerRace({
 
         setBestTime((oldBest) => {
           if (!oldBest || finalTime < oldBest) {
-            localStorage.setItem("racer_solo_best", finalTime.toString());
+            localStorage.setItem(`racer_solo_best_${selectedTrackId}`, finalTime.toString());
             return finalTime;
           }
           return oldBest;
@@ -254,7 +276,7 @@ export function useSinglePlayerRace({
 
       return updated;
     });
-  }, [stopTimer]);
+  }, [stopTimer, selectedTrackId]);
 
   const handleAIPackUpdate = useCallback((pack: Player[], standings: StandingsResult) => {
     setAiOpponents(pack);
@@ -287,6 +309,9 @@ export function useSinglePlayerRace({
     bestTime,
     raceTimeMs,
     player,
+    selectedTrackId,
+    setSelectedTrackId,
+    selectedTrack,
     aiDifficulty,
     setAiDifficulty,
     aiOpponentsCount,

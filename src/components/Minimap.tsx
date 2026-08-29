@@ -2,7 +2,7 @@ import React, { useMemo } from "react";
 import * as THREE from "three";
 import { Player, TrafficVehicle } from "../types";
 import { getSpeedBreakerPositions } from "../utils/speedBreakers";
-import { TRACK_POINTS } from "../constants/track";
+import { TrackConfig, getTrack } from "../constants/track";
 
 interface MinimapProps {
   players: Player[];
@@ -10,6 +10,7 @@ interface MinimapProps {
   theme: "light" | "dark";
   speedBreakersCount?: number;
   traffic?: TrafficVehicle[];
+  track?: TrackConfig;
 }
 
 export default function Minimap({
@@ -18,36 +19,44 @@ export default function Minimap({
   theme,
   speedBreakersCount = 0,
   traffic = [],
+  track,
 }: MinimapProps) {
+  const activeTrack = track || getTrack();
+  const trackCurve = activeTrack.curve;
+  const cpCount = activeTrack.checkpointCount;
+  const viewBox = activeTrack.viewBox;
+
   // Generate highly-precise curved polyline points using CatmullRomCurve3
   const { pathData, checkpoints, speedBreakerBlips } = useMemo(() => {
-    const curve = new THREE.CatmullRomCurve3(TRACK_POINTS, true);
-    
-    // Evaluate 150 points for an ultra-smooth outline
-    const curvePoints = curve.getPoints(150);
-    const dStr = curvePoints
-      .map((pt, i) => `${i === 0 ? "M" : "L"} ${pt.x.toFixed(1)} ${pt.z.toFixed(1)}`)
-      .join(" ") + " Z";
+    // Evaluate 180 points for an ultra-smooth outline
+    const curvePoints = trackCurve.getPoints(180);
+    const dStr =
+      curvePoints
+        .map(
+          (pt, i) =>
+            `${i === 0 ? "M" : "L"} ${pt.x.toFixed(1)} ${pt.z.toFixed(1)}`
+        )
+        .join(" ") + " Z";
 
-    // Mark exact check points along the track (using 5 checkpoints standard)
+    // Mark exact check points along the track
     const cps = [];
-    for (let c = 0; c < 5; c++) {
-      const u = c / 5;
-      const pt = curve.getPointAt(u);
+    for (let c = 0; c < cpCount; c++) {
+      const u = c / cpCount;
+      const pt = trackCurve.getPointAt(u);
       cps.push({
         x: pt.x,
         z: pt.z,
-        index: c + 1
+        index: c + 1,
       });
     }
 
     // Speed breakers markers
     const sBPositions = getSpeedBreakerPositions(speedBreakersCount);
     const sbBlips = sBPositions.map((u, i) => {
-      const pt = curve.getPointAt(u);
-      const tangent = curve.getTangentAt(u).normalize();
+      const pt = trackCurve.getPointAt(u);
+      const tangent = trackCurve.getTangentAt(u).normalize();
       const normal = new THREE.Vector3(-tangent.z, 0, tangent.x).normalize();
-      const halfW = 10;
+      const halfW = activeTrack.roadWidth / 2;
       const p1 = pt.clone().add(normal.clone().multiplyScalar(halfW));
       const p2 = pt.clone().sub(normal.clone().multiplyScalar(halfW));
       return {
@@ -62,22 +71,28 @@ export default function Minimap({
     });
 
     return { pathData: dStr, checkpoints: cps, speedBreakerBlips: sbBlips };
-  }, [speedBreakersCount]);
-
-  // Track bounding box mapping coordinates
-  // Range: x: [-140, 280] + padding -> viewBox [-165, -125, 470, 435]
-  const viewBox = "-165 -125 470 435";
+  }, [trackCurve, cpCount, speedBreakersCount, activeTrack.roadWidth]);
 
   return (
-    <div className={`p-2.5 rounded-2xl border flex flex-col items-center select-none backdrop-blur-md transition-all duration-300 pointer-events-auto shadow-2xl relative w-36 h-36 md:w-44 md:h-44 ${
-      theme === "dark" 
-        ? "bg-slate-950/85 border-slate-800 text-slate-100" 
-        : "bg-white/95 border-slate-200 text-slate-800 shadow"
-    }`}>
-      {/* HUD Label */}
-      <span className="absolute top-1.5 left-2.5 text-[8px] font-mono font-bold uppercase tracking-wider opacity-60">
-        GPS TRACK UNIT
-      </span>
+    <div
+      className={`p-2.5 rounded-2xl border flex flex-col items-center select-none backdrop-blur-md transition-all duration-300 pointer-events-auto shadow-2xl relative w-36 h-36 md:w-44 md:h-44 ${
+        theme === "dark"
+          ? "bg-slate-950/85 border-slate-800 text-slate-100"
+          : "bg-white/95 border-slate-200 text-slate-800 shadow"
+      }`}
+    >
+      {/* HUD Label & Track Name */}
+      <div className="absolute top-1.5 inset-x-2.5 flex items-center justify-between pointer-events-none">
+        <span className="text-[8px] font-mono font-bold uppercase tracking-wider opacity-60">
+          GPS TRACK
+        </span>
+        <span
+          className="text-[7.5px] font-mono font-bold truncate max-w-[80px]"
+          style={{ color: activeTrack.themeColor }}
+        >
+          {activeTrack.name.toUpperCase()}
+        </span>
+      </div>
 
       {/* Grid backdrop details */}
       <div className="absolute inset-0 overflow-hidden rounded-2xl pointer-events-none opacity-[0.03] flex items-center justify-center">
@@ -107,11 +122,11 @@ export default function Minimap({
           strokeLinejoin="round"
         />
 
-        {/* Inner high-contrast racing line */}
+        {/* Inner high-contrast racing line with track theme color */}
         <path
           d={pathData}
           fill="none"
-          stroke={theme === "dark" ? "#6366f1" : "#4f46e5"}
+          stroke={activeTrack.themeColor}
           strokeWidth="10"
           strokeLinecap="round"
           strokeLinejoin="round"
@@ -132,12 +147,7 @@ export default function Minimap({
               strokeLinecap="round"
               opacity="0.9"
             />
-            <circle
-              cx={sb.cx}
-              cy={sb.cz}
-              r="2"
-              fill="#fbbf24"
-            />
+            <circle cx={sb.cx} cy={sb.cz} r="2" fill="#fbbf24" />
           </g>
         ))}
 
@@ -219,7 +229,11 @@ export default function Minimap({
               )}
 
               {/* Player Arrow / Pointer rotated pointing to car's actual facing direction */}
-              <g transform={`translate(${px}, ${pz}) rotate(${(-rotY * 180) / Math.PI})`}>
+              <g
+                transform={`translate(${px}, ${pz}) rotate(${
+                  (-rotY * 180) / Math.PI
+                })`}
+              >
                 {/* Visual directional arrow blip */}
                 <polygon
                   points="0,16 11,-10 0,-4 -11,-10"
@@ -236,7 +250,11 @@ export default function Minimap({
                 width="44"
                 height="10"
                 rx="3"
-                fill={theme === "dark" ? "rgba(2, 6, 23, 0.85)" : "rgba(255, 255, 255, 0.9)"}
+                fill={
+                  theme === "dark"
+                    ? "rgba(2, 6, 23, 0.85)"
+                    : "rgba(255, 255, 255, 0.9)"
+                }
                 stroke={p.color}
                 strokeWidth="1"
               />

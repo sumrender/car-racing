@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { TRACK_CURVE, ROAD_WIDTH, CHECKPOINT_COUNT } from "../constants/track";
+import { TrackConfig, getTrack } from "../constants/track";
 import { NEON_CHECKPOINT_COLORS } from "../constants/colors";
 
 export interface TrackSceneComponents {
@@ -14,8 +14,17 @@ export interface TrackSceneComponents {
   starPoints: THREE.Points;
 }
 
-export function buildTrackSceneComponents(isDark: boolean): TrackSceneComponents {
-  const sampleCount = 180;
+export function buildTrackSceneComponents(
+  isDark: boolean,
+  trackConfig?: TrackConfig
+): TrackSceneComponents {
+  const track = trackConfig || getTrack();
+  const trackCurve = track.curve;
+  const roadWidth = track.roadWidth;
+  const checkpointCount = track.checkpointCount;
+  const env = track.environment;
+
+  const sampleCount = 200;
 
   // 1. PROCEDURAL ROAD MESH
   const roadVertices: number[] = [];
@@ -24,13 +33,13 @@ export function buildTrackSceneComponents(isDark: boolean): TrackSceneComponents
 
   for (let i = 0; i <= sampleCount; i++) {
     const u = i / sampleCount;
-    const point = TRACK_CURVE.getPointAt(u);
-    const tangent = TRACK_CURVE.getTangentAt(u).normalize();
+    const point = trackCurve.getPointAt(u);
+    const tangent = trackCurve.getTangentAt(u).normalize();
     const up = new THREE.Vector3(0, 1, 0);
     const right = new THREE.Vector3().crossVectors(tangent, up).normalize();
 
-    const leftPt = point.clone().add(right.clone().multiplyScalar(ROAD_WIDTH / 2));
-    const rightPt = point.clone().sub(right.clone().multiplyScalar(ROAD_WIDTH / 2));
+    const leftPt = point.clone().add(right.clone().multiplyScalar(roadWidth / 2));
+    const rightPt = point.clone().sub(right.clone().multiplyScalar(roadWidth / 2));
 
     roadVertices.push(leftPt.x, leftPt.y, leftPt.z);
     roadVertices.push(rightPt.x, rightPt.y, rightPt.z);
@@ -52,7 +61,7 @@ export function buildTrackSceneComponents(isDark: boolean): TrackSceneComponents
   roadGeo.computeVertexNormals();
 
   const roadMat = new THREE.MeshStandardMaterial({
-    color: isDark ? "#111827" : "#334155",
+    color: isDark ? env.roadColorDark : env.roadColorLight,
     roughness: 0.7,
     metalness: 0.1,
     side: THREE.DoubleSide,
@@ -68,16 +77,16 @@ export function buildTrackSceneComponents(isDark: boolean): TrackSceneComponents
 
   for (let i = 0; i <= sampleCount; i++) {
     const u = i / sampleCount;
-    const point = TRACK_CURVE.getPointAt(u);
-    const tangent = TRACK_CURVE.getTangentAt(u).normalize();
+    const point = trackCurve.getPointAt(u);
+    const tangent = trackCurve.getTangentAt(u).normalize();
     const up = new THREE.Vector3(0, 1, 0);
     const right = new THREE.Vector3().crossVectors(tangent, up).normalize();
 
-    const lOffset = ROAD_WIDTH / 2;
+    const lOffset = roadWidth / 2;
     const lInner = point.clone().add(right.clone().multiplyScalar(lOffset));
     const lOuter = point.clone().add(right.clone().multiplyScalar(lOffset + curbWidth));
 
-    const rOffset = ROAD_WIDTH / 2;
+    const rOffset = roadWidth / 2;
     const rInner = point.clone().sub(right.clone().multiplyScalar(rOffset));
     const rOuter = point.clone().sub(right.clone().multiplyScalar(rOffset + curbWidth));
 
@@ -111,7 +120,7 @@ export function buildTrackSceneComponents(isDark: boolean): TrackSceneComponents
   curbRightGeo.computeVertexNormals();
 
   const curbMat = new THREE.MeshStandardMaterial({
-    color: "#ef4444",
+    color: env.curbColor,
     roughness: 0.5,
     metalness: 0.2,
   });
@@ -124,13 +133,13 @@ export function buildTrackSceneComponents(isDark: boolean): TrackSceneComponents
 
   for (let i = 0; i <= sampleCount; i++) {
     const u = i / sampleCount;
-    const point = TRACK_CURVE.getPointAt(u);
-    const tangent = TRACK_CURVE.getTangentAt(u).normalize();
+    const point = trackCurve.getPointAt(u);
+    const tangent = trackCurve.getTangentAt(u).normalize();
     const up = new THREE.Vector3(0, 1, 0);
     const right = new THREE.Vector3().crossVectors(tangent, up).normalize();
 
-    const leftEdge = point.clone().add(right.clone().multiplyScalar(ROAD_WIDTH / 2));
-    const rightEdge = point.clone().sub(right.clone().multiplyScalar(ROAD_WIDTH / 2));
+    const leftEdge = point.clone().add(right.clone().multiplyScalar(roadWidth / 2));
+    const rightEdge = point.clone().sub(right.clone().multiplyScalar(roadWidth / 2));
 
     leftEdge.y += 0.8;
     rightEdge.y += 0.8;
@@ -143,11 +152,11 @@ export function buildTrackSceneComponents(isDark: boolean): TrackSceneComponents
   const rightFenceGeo = new THREE.BufferGeometry().setFromPoints(rightFencePoints);
 
   const laserMatLeft = new THREE.LineBasicMaterial({
-    color: "#ec4899",
+    color: env.laserLeft,
     linewidth: 3,
   });
   const laserMatRight = new THREE.LineBasicMaterial({
-    color: "#06b6d4",
+    color: env.laserRight,
     linewidth: 3,
   });
 
@@ -167,18 +176,18 @@ export function buildTrackSceneComponents(isDark: boolean): TrackSceneComponents
   const baseMat = new THREE.MeshStandardMaterial({ color: "#1e293b", roughness: 0.5 });
   const poleMat = new THREE.MeshStandardMaterial({ color: "#475569", metalness: 0.8, roughness: 0.2 });
 
-  for (let c = 0; c < CHECKPOINT_COUNT; c++) {
-    const u = c / CHECKPOINT_COUNT;
-    const point = TRACK_CURVE.getPointAt(u);
+  for (let c = 0; c < checkpointCount; c++) {
+    const u = c / checkpointCount;
+    const point = trackCurve.getPointAt(u);
     checkpointPositions.push(point);
 
-    const tangent = TRACK_CURVE.getTangentAt(u).normalize();
+    const tangent = trackCurve.getTangentAt(u).normalize();
     const up = new THREE.Vector3(0, 1, 0);
     const right = new THREE.Vector3().crossVectors(tangent, up).normalize();
 
     const beacon = new THREE.Group();
     const isLeftSide = c % 2 === 0;
-    const sideOffset = isLeftSide ? (ROAD_WIDTH / 2 + 1.2) : -(ROAD_WIDTH / 2 + 1.2);
+    const sideOffset = isLeftSide ? (roadWidth / 2 + 1.2) : -(roadWidth / 2 + 1.2);
     const beaconPos = point.clone().add(right.clone().multiplyScalar(sideOffset));
     beacon.position.copy(beaconPos);
 
@@ -232,9 +241,9 @@ export function buildTrackSceneComponents(isDark: boolean): TrackSceneComponents
   }
 
   // 5. GRID & ENVIRONMENT GROUND
-  const gridGeometry = new THREE.PlaneGeometry(800, 800, 80, 80);
+  const gridGeometry = new THREE.PlaneGeometry(900, 900, 90, 90);
   const gridMaterial = new THREE.MeshBasicMaterial({
-    color: isDark ? "#1e1b4b" : "#cbd5e1",
+    color: isDark ? env.gridColorDark : env.gridColorLight,
     wireframe: true,
     transparent: true,
     opacity: isDark ? 0.25 : 0.45,
@@ -248,9 +257,9 @@ export function buildTrackSceneComponents(isDark: boolean): TrackSceneComponents
   const starsGeo = new THREE.BufferGeometry();
   const starsPos = new Float32Array(starsCount * 3);
   for (let i = 0; i < starsCount * 3; i += 3) {
-    starsPos[i] = (Math.random() - 0.5) * 600;
-    starsPos[i + 1] = Math.random() * 200 + 10;
-    starsPos[i + 2] = (Math.random() - 0.5) * 600;
+    starsPos[i] = (Math.random() - 0.5) * 700;
+    starsPos[i + 1] = Math.random() * 250 + 10;
+    starsPos[i + 2] = (Math.random() - 0.5) * 700;
   }
   starsGeo.setAttribute("position", new THREE.BufferAttribute(starsPos, 3));
   const starsMat = new THREE.PointsMaterial({

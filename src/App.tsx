@@ -146,6 +146,8 @@ export default function App() {
           onUserNameChange={setUserName}
           userColor={userColor}
           onUserColorChange={setUserColor}
+          selectedTrackId={singleRace.selectedTrackId}
+          onSelectTrack={singleRace.setSelectedTrackId}
           aiDifficulty={singleRace.aiDifficulty}
           onAiDifficultyChange={singleRace.setAiDifficulty}
           aiOpponentsCount={singleRace.aiOpponentsCount}
@@ -175,6 +177,7 @@ export default function App() {
             theme={theme}
             isSinglePlayer={true}
             isPaused={singleRace.isPaused}
+            track={singleRace.selectedTrack}
             aiDifficulty={singleRace.aiDifficulty}
             aiCount={singleRace.aiOpponentsCount}
             speedBreakersCount={singleRace.speedBreakersCount}
@@ -206,6 +209,7 @@ export default function App() {
             onExit={handleExitToMainMenu}
             players={[singleRace.player, ...singleRace.aiOpponents]}
             myPlayerId={singleRace.player.id}
+            track={singleRace.selectedTrack}
             speedBreakersCount={singleRace.speedBreakersCount}
             trafficCount={singleRace.trafficCount}
             trafficVehicles={singleRace.trafficVehicles}
@@ -223,6 +227,7 @@ export default function App() {
           aiOpponents={singleRace.aiOpponents}
           standings={singleRace.aiStandings}
           bestTime={singleRace.bestTime}
+          track={singleRace.selectedTrack}
           onRestart={singleRace.startRace}
           onBackToSetup={() => singleRace.setStatus("setup")}
           onExitToMenu={handleExitToMainMenu}

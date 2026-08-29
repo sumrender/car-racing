@@ -24,10 +24,8 @@ import {
 } from "../utils/trafficSystem";
 import { createTrafficVehicleMesh } from "../utils/trafficMeshBuilder";
 import {
-  TRACK_POINTS,
-  TRACK_CURVE,
-  ROAD_WIDTH,
-  checkOnRoad,
+  TrackConfig,
+  getTrack,
 } from "../constants/track";
 import { createCarMesh } from "../utils/carMeshBuilder";
 import { buildTrackSceneComponents } from "../utils/trackMeshBuilder";
@@ -49,6 +47,7 @@ interface RaceCanvasProps {
   trafficCount?: number;
   soundManager?: ISoundManager;
   isPaused?: boolean;
+  track?: TrackConfig;
   onAIOpponentUpdate?: (ai: Player, standings: StandingsResult) => void;
   onAIPackUpdate?: (aiPack: Player[], standings: StandingsResult) => void;
   onTrafficUpdate?: (vehicles: TrafficVehicle[]) => void;
@@ -67,10 +66,12 @@ export default function RaceCanvas({
   trafficCount = 8,
   soundManager,
   isPaused = false,
+  track,
   onAIOpponentUpdate,
   onAIPackUpdate,
   onTrafficUpdate,
 }: RaceCanvasProps) {
+  const activeTrack = track || getTrack();
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
@@ -83,6 +84,7 @@ export default function RaceCanvas({
   const nitroOverlayRef = useRef<HTMLDivElement>(null);
   const jumpOverlayRef = useRef<HTMLDivElement>(null);
   const jumpAltitudeTextRef = useRef<HTMLSpanElement>(null);
+  const resetOverlayRef = useRef<HTMLDivElement>(null);
 
   // Keep often-changed props in Refs to avoid reconstructing Three.js on every frame
   const localPlayerRef = useRef<Player>(localPlayer);
@@ -113,12 +115,15 @@ export default function RaceCanvas({
     jumpStateRef: playerJumpStateRef,
     keysRef,
     resetPhysics,
+    resetToTrackCenter,
     stepPhysics,
   } = useCarPhysics({
     nitroOverlayRef,
     jumpOverlayRef,
     jumpAltitudeTextRef,
+    resetOverlayRef,
     soundManager: soundRef.current,
+    track: activeTrack,
     onFinish: (finishTime) => {
       onUpdateStateRef.current({
         finished: true,
@@ -159,12 +164,12 @@ export default function RaceCanvas({
       if (isSinglePlayer && trafficCountRef.current > 0) {
         trafficVehiclesRef.current = generateTrafficVehicles(
           trafficCountRef.current,
-          TRACK_CURVE,
-          ROAD_WIDTH
+          activeTrack.curve,
+          activeTrack.roadWidth
         );
       }
     }
-  }, [activeRoomStatus, aiDifficulty, aiCount, isSinglePlayer]);
+  }, [activeRoomStatus, aiDifficulty, aiCount, isSinglePlayer, activeTrack]);
 
   useEffect(() => {
     onUpdateStateRef.current = onUpdateState;
@@ -198,10 +203,14 @@ export default function RaceCanvas({
 
     const scene = new THREE.Scene();
     const isDark = theme === "dark";
+    const env = activeTrack.environment;
+    const trackCurve = activeTrack.curve;
+    const roadWidth = activeTrack.roadWidth;
+    const checkOnRoad = activeTrack.checkOnRoad;
 
-    const bgColStr = isDark ? "#0c0f1a" : "#f1f5f9";
+    const bgColStr = isDark ? env.skyColorDark : env.skyColorLight;
     scene.background = new THREE.Color(bgColStr);
-    scene.fog = new THREE.FogExp2(bgColStr, 0.003);
+    scene.fog = new THREE.FogExp2(bgColStr, env.fogDensity || 0.003);
 
     const camera = new THREE.PerspectiveCamera(60, width / height, 0.1, 1000);
     const renderer = new THREE.WebGLRenderer({
@@ -213,27 +222,27 @@ export default function RaceCanvas({
 
     // LIGHTING SYSTEM
     const ambientLight = new THREE.AmbientLight(
-      isDark ? "#4f46e5" : "#ffffff",
-      isDark ? 0.3 : 0.75
+      isDark ? env.ambientColorDark : env.ambientColorLight,
+      isDark ? 0.35 : 0.8
     );
     scene.add(ambientLight);
 
     const dirLight = new THREE.DirectionalLight(
-      isDark ? "#9333ea" : "#fef08a",
+      isDark ? env.laserLeft : env.laserRight,
       isDark ? 0.8 : 0.65
     );
     dirLight.position.set(100, 150, 50);
     scene.add(dirLight);
 
     const sunLight = new THREE.DirectionalLight(
-      isDark ? "#3b82f6" : "#38bdf8",
-      isDark ? 0.6 : 1.1
+      isDark ? env.sunColorDark : env.sunColorLight,
+      isDark ? 0.7 : 1.15
     );
     sunLight.position.set(-100, 120, -100);
     scene.add(sunLight);
 
     // PROCEDURAL TRACK & SCENE COMPONENTS (Built via trackMeshBuilder)
-    const trackComponents = buildTrackSceneComponents(isDark);
+    const trackComponents = buildTrackSceneComponents(isDark, activeTrack);
     scene.add(trackComponents.gridMesh);
     scene.add(trackComponents.starPoints);
     scene.add(trackComponents.roadMesh);
@@ -246,8 +255,8 @@ export default function RaceCanvas({
     // SPEED BREAKERS TRACK OBJECTS
     const speedBreakersData = generateSpeedBreakers(
       speedBreakersCountRef.current,
-      TRACK_CURVE,
-      ROAD_WIDTH
+      trackCurve,
+      roadWidth
     );
     speedBreakersRef.current = speedBreakersData;
     const speedBreakerMeshes: THREE.Group[] = [];
@@ -349,7 +358,7 @@ export default function RaceCanvas({
     };
     window.addEventListener("resize", handleResize);
 
-    const trackLength = TRACK_CURVE.getLength();
+    const trackLength = trackCurve.getLength();
 
     // Spawn dedicated AI Car Meshes if in Single Player mode
     const aiCarMeshes: THREE.Group[] = [];
@@ -367,8 +376,8 @@ export default function RaceCanvas({
       if (trafficVehiclesRef.current.length === 0) {
         trafficVehiclesRef.current = generateTrafficVehicles(
           trafficCountRef.current,
-          TRACK_CURVE,
-          ROAD_WIDTH
+          trackCurve,
+          roadWidth
         );
       }
       trafficVehiclesRef.current.forEach((tv) => {
@@ -449,7 +458,7 @@ export default function RaceCanvas({
           const updatedAI = updateAISimulation(
             aiState,
             dt,
-            TRACK_CURVE,
+            trackCurve,
             trackLength,
             activeRoomStatusRef.current as any,
             (window as any).raceStartTime || Date.now(),
@@ -537,7 +546,7 @@ export default function RaceCanvas({
         trafficVehiclesRef.current = updateTrafficSimulation(
           trafficVehiclesRef.current,
           dt,
-          TRACK_CURVE,
+          trackCurve,
           trackLength,
           activeRoomStatusRef.current as any
         );
@@ -643,7 +652,7 @@ export default function RaceCanvas({
                   aiState.currentSpeed = impact.speed;
 
                   const roadCheckAI = checkOnRoad(new THREE.Vector3(impact.x, 0, impact.z));
-                  const tangentAI = TRACK_CURVE.getTangentAt(roadCheckAI.u).normalize();
+                  const tangentAI = trackCurve.getTangentAt(roadCheckAI.u).normalize();
                   const normalAI = new THREE.Vector3(-tangentAI.z, 0, tangentAI.x);
                   const diffAI = new THREE.Vector3(
                     impact.x - roadCheckAI.closestPt.x,
@@ -701,7 +710,7 @@ export default function RaceCanvas({
                 tv.speed = impact.speed;
 
                 const roadCheckTV = checkOnRoad(new THREE.Vector3(impact.x, 0, impact.z));
-                const tangentTV = TRACK_CURVE.getTangentAt(roadCheckTV.u).normalize();
+                const tangentTV = trackCurve.getTangentAt(roadCheckTV.u).normalize();
                 const normalTV = new THREE.Vector3(-tangentTV.z, 0, tangentTV.x);
                 const diffTV = new THREE.Vector3(
                   impact.x - roadCheckTV.closestPt.x,
@@ -963,7 +972,7 @@ export default function RaceCanvas({
       soundRef.current.updateDrift(false, 0, 0.1);
       soundRef.current.updateWindRush(0, false, true);
     };
-  }, [localPlayer.color, localPlayer.id, theme, trafficCount]);
+  }, [localPlayer.color, localPlayer.id, theme, trafficCount, activeTrack]);
 
   return (
     <div
@@ -987,6 +996,17 @@ export default function RaceCanvas({
         >
           +2.4m
         </span>
+      </div>
+
+      {/* Track Position Reset Flash Banner */}
+      <div
+        id="track-reset-banner"
+        ref={resetOverlayRef}
+        style={{ opacity: 0, transform: "translate(-50%, -10px) scale(0.95)" }}
+        className="pointer-events-none absolute top-36 left-1/2 -translate-x-1/2 flex items-center gap-2 px-4 py-1.5 bg-indigo-950/95 border border-indigo-400/90 rounded-full text-indigo-200 font-mono text-xs font-black tracking-widest uppercase shadow-[0_0_25px_rgba(99,102,241,0.7)] transition-all duration-200 will-change-[opacity,transform] z-30"
+      >
+        <span className="text-indigo-400 text-sm">🔄</span>
+        <span>TRACK RESET • CENTERED</span>
       </div>
 
       {/* Screen-Space Nitro Burst Radial Vignette */}

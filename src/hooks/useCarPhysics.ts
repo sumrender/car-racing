@@ -10,10 +10,8 @@ import {
   CarJumpState,
 } from "../utils/speedBreakers";
 import {
-  TRACK_CURVE,
-  ROAD_WIDTH,
-  CHECKPOINT_COUNT,
-  checkOnRoad,
+  TrackConfig,
+  getTrack,
 } from "../constants/track";
 
 export interface CarPhysicsState {
@@ -48,8 +46,10 @@ interface UseCarPhysicsOptions {
   nitroOverlayRef?: RefObject<HTMLDivElement | null>;
   jumpOverlayRef?: RefObject<HTMLDivElement | null>;
   jumpAltitudeTextRef?: RefObject<HTMLSpanElement | null>;
+  resetOverlayRef?: RefObject<HTMLDivElement | null>;
   onFinish?: (finishTime: number) => void;
   soundManager?: ISoundManager;
+  track?: TrackConfig;
 }
 
 const INITIAL_CAR_STATE: CarPhysicsState = {
@@ -82,9 +82,23 @@ const INITIAL_JUMP_STATE: CarJumpState = {
 };
 
 export function useCarPhysics(options: UseCarPhysicsOptions = {}) {
-  const { nitroOverlayRef, jumpOverlayRef, jumpAltitudeTextRef, onFinish, soundManager } = options;
+  const {
+    nitroOverlayRef,
+    jumpOverlayRef,
+    jumpAltitudeTextRef,
+    resetOverlayRef,
+    onFinish,
+    soundManager,
+    track,
+  } = options;
   const onFinishRef = useRef(onFinish);
   const soundRef = useRef<ISoundManager>(soundManager || getSoundManager());
+  const trackRef = useRef<TrackConfig>(track || getTrack());
+  const resetTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  useEffect(() => {
+    trackRef.current = track || getTrack();
+  }, [track]);
 
   useEffect(() => {
     onFinishRef.current = onFinish;
@@ -93,6 +107,14 @@ export function useCarPhysics(options: UseCarPhysicsOptions = {}) {
   useEffect(() => {
     soundRef.current = soundManager || getSoundManager();
   }, [soundManager]);
+
+  useEffect(() => {
+    return () => {
+      if (resetTimeoutRef.current) {
+        clearTimeout(resetTimeoutRef.current);
+      }
+    };
+  }, []);
 
   const carStateRef = useRef<CarPhysicsState>({ ...INITIAL_CAR_STATE });
   const jumpStateRef = useRef<CarJumpState>({ ...INITIAL_JUMP_STATE });
@@ -167,6 +189,52 @@ export function useCarPhysics(options: UseCarPhysicsOptions = {}) {
     nitroExhaustTimerRef.current = 0;
   }, []);
 
+  const resetToTrackCenter = useCallback(() => {
+    const currentTrack = trackRef.current;
+    const pState = carStateRef.current;
+    const localPos = new THREE.Vector3(pState.x, pState.y, pState.z);
+    const roadCheck = currentTrack.checkOnRoad(localPos);
+
+    // 1. Position to exact track centerline point
+    pState.x = roadCheck.closestPt.x;
+    pState.y = roadCheck.closestPt.y;
+    pState.z = roadCheck.closestPt.z;
+
+    // 2. Align rotation to face forward along the track curve tangent
+    const tangent = currentTrack.curve.getTangentAt(roadCheck.u).normalize();
+    pState.rotationY = Math.atan2(tangent.x, tangent.z);
+
+    // 3. Reset momentum and dynamic attributes
+    pState.speed = 0;
+    pState.driftScore = 0;
+    pState.driftMeter = 0;
+    pState.driftAngle = 0;
+    pState.isDrifting = false;
+    pState.boostTimer = 0;
+
+    jumpStateRef.current = { ...INITIAL_JUMP_STATE };
+    currentSteerAngleRef.current = 0;
+
+    soundRef.current.stopNitro();
+    soundRef.current.updateDrift(false, 0, 0.1);
+
+    // 4. Trigger recovery feedback overlay
+    if (resetOverlayRef?.current) {
+      resetOverlayRef.current.style.opacity = "1";
+      resetOverlayRef.current.style.transform = "translate(-50%, 0) scale(1)";
+      if (resetTimeoutRef.current) {
+        clearTimeout(resetTimeoutRef.current);
+      }
+      resetTimeoutRef.current = setTimeout(() => {
+        if (resetOverlayRef?.current) {
+          resetOverlayRef.current.style.opacity = "0";
+          resetOverlayRef.current.style.transform =
+            "translate(-50%, -10px) scale(0.95)";
+        }
+      }, 1200);
+    }
+  }, [resetOverlayRef]);
+
   const stepPhysics = useCallback(
     (
       dt: number,
@@ -186,9 +254,10 @@ export function useCarPhysics(options: UseCarPhysicsOptions = {}) {
         return;
       }
 
+      const currentTrack = trackRef.current;
       const localPos = new THREE.Vector3(pState.x, pState.y, pState.z);
-      const roadCheck = checkOnRoad(localPos);
-      const maxAllowedDist = ROAD_WIDTH / 2 - 1.8;
+      const roadCheck = currentTrack.checkOnRoad(localPos);
+      const maxAllowedDist = currentTrack.roadWidth / 2 - 1.8;
 
       // 1. Off-road boundary constraint & sparks
       if (roadCheck.distance > maxAllowedDist) {
@@ -481,34 +550,25 @@ export function useCarPhysics(options: UseCarPhysicsOptions = {}) {
         }
       }
 
-      // 7. Reset to track checkpoint ('R' key)
+      // 7. Reset to track center ('R' key)
       if (keys.r) {
-        const checkU = pState.checkpoint / CHECKPOINT_COUNT;
-        const checkpointPt = TRACK_CURVE.getPointAt(checkU);
-        pState.x = checkpointPt.x;
-        pState.y = checkpointPt.y;
-        pState.z = checkpointPt.z;
-        const tangent = TRACK_CURVE.getTangentAt(checkU);
-        pState.rotationY = Math.atan2(tangent.x, tangent.z);
-        pState.speed = 0;
-        pState.driftScore = 0;
-        pState.driftMeter = 0;
-        pState.isDrifting = false;
+        keys.r = false; // consume single keypress trigger
+        resetToTrackCenter();
       }
 
       // 8. Checkpoint tracking & Lap Counter
       const currentU = roadCheck.u;
       const checkpointTolerance = 0.08;
 
-      for (let cp = 0; cp < CHECKPOINT_COUNT; cp++) {
-        const targetU = cp / CHECKPOINT_COUNT;
+      for (let cp = 0; cp < currentTrack.checkpointCount; cp++) {
+        const targetU = cp / currentTrack.checkpointCount;
         const diffU = Math.min(
           Math.abs(currentU - targetU),
           1.0 - Math.abs(currentU - targetU)
         );
 
         if (diffU < checkpointTolerance) {
-          const nextExpected = (pState.checkpoint + 1) % CHECKPOINT_COUNT;
+          const nextExpected = (pState.checkpoint + 1) % currentTrack.checkpointCount;
 
           if (cp === nextExpected) {
             pState.checkpoint = cp;
@@ -575,6 +635,7 @@ export function useCarPhysics(options: UseCarPhysicsOptions = {}) {
     keysRef,
     currentSteerAngleRef,
     resetPhysics,
+    resetToTrackCenter,
     stepPhysics,
   };
 }

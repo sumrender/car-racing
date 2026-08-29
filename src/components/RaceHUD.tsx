@@ -3,6 +3,7 @@ import { Player, TrafficVehicle } from "../types";
 import { formatTime } from "../utils/time";
 import { ThemeMode } from "../hooks/useTheme";
 import { useSoundManager } from "../hooks/useSoundManager";
+import { TrackConfig } from "../constants/track";
 import Speedometer from "./Speedometer";
 import Minimap from "./Minimap";
 
@@ -28,6 +29,7 @@ interface RaceHUDProps {
   onExit: () => void;
   players: Player[];
   myPlayerId: string | null;
+  track?: TrackConfig;
   speedBreakersCount?: number;
   isMultiplayer?: boolean;
   bestTime?: number | null;
@@ -58,6 +60,7 @@ export default function RaceHUD({
   onExit,
   players,
   myPlayerId,
+  track,
   speedBreakersCount = 0,
   isMultiplayer = false,
   bestTime,
@@ -232,6 +235,26 @@ export default function RaceHUD({
             {isDark ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
           </button>
 
+          {/* Quick Track Center Reset (R key) */}
+          <button
+            id="hud-reset-position-btn"
+            onClick={() => {
+              window.dispatchEvent(new KeyboardEvent("keydown", { key: "r" }));
+            }}
+            className={`px-2.5 py-1.5 sm:px-3 sm:py-2 rounded-xl border backdrop-blur-md shadow-lg transition-all flex items-center gap-1.5 font-mono text-[11px] font-bold active:scale-95 ${
+              isDark
+                ? "bg-slate-950/85 border-slate-800 text-indigo-300 hover:bg-slate-800 hover:border-indigo-500/50"
+                : "bg-white/95 border-slate-200 text-indigo-600 hover:bg-indigo-50 hover:border-indigo-300 shadow"
+            }`}
+            title="Reset car to track center facing forward (Press R)"
+          >
+            <RotateCcw className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">Reset Track</span>
+            <span className="px-1 py-0.5 rounded bg-indigo-500/20 text-indigo-300 text-[9px] font-black">
+              R
+            </span>
+          </button>
+
           {!isMultiplayer && (
             <button
               id="hud-restart-btn"
@@ -285,6 +308,7 @@ export default function RaceHUD({
         {/* Left: GPS Minimap */}
         <div className="pointer-events-auto">
           <Minimap
+            track={track}
             players={players}
             myPlayerId={myPlayerId}
             theme={theme}
