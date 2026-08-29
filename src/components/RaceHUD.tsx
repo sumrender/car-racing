@@ -65,7 +65,7 @@ export default function RaceHUD({
   trafficCount,
   trafficVehicles,
 }: RaceHUDProps) {
-  const { isMuted, toggleMute } = useSoundManager();
+  const { isMuted, toggleMute, soundManager } = useSoundManager();
   const isDark = theme === "dark";
   const activeTraffic = trafficVehicles || traffic;
   const displayTrafficCount = trafficCount !== undefined ? trafficCount : activeTraffic.length;
@@ -200,7 +200,13 @@ export default function RaceHUD({
           {/* Quick Action Buttons */}
           <button
             id="hud-mute-toggle-btn"
-            onClick={toggleMute}
+            onClick={() => {
+              const nextMuted = toggleMute();
+              soundManager.warmUp();
+              if (!nextMuted) {
+                soundManager.playTestTone();
+              }
+            }}
             className={`p-2 sm:p-2.5 rounded-xl border backdrop-blur-md shadow-lg transition-all ${
               isMuted
                 ? "bg-red-950/80 border-red-800/80 text-red-400 hover:bg-red-900/80"

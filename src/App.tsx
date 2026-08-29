@@ -82,12 +82,18 @@ export default function App() {
   useEffect(() => {
     const handleGlobalKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
-        setIsSettingsOpen((prev) => !prev);
+        setIsSettingsOpen((prev) => {
+          const next = !prev;
+          if (gameMode === "single" && (singleRace.status === "racing" || singleRace.status === "countdown")) {
+            singleRace.setIsPaused(next);
+          }
+          return next;
+        });
       }
     };
     window.addEventListener("keydown", handleGlobalKeyDown);
     return () => window.removeEventListener("keydown", handleGlobalKeyDown);
-  }, []);
+  }, [gameMode, singleRace]);
 
   function handleExitToMainMenu() {
     singleRace.resetToSetup();
@@ -168,6 +174,7 @@ export default function App() {
             onUpdateState={singleRace.handlePlayerUpdate}
             theme={theme}
             isSinglePlayer={true}
+            isPaused={singleRace.isPaused}
             aiDifficulty={singleRace.aiDifficulty}
             aiCount={singleRace.aiOpponentsCount}
             speedBreakersCount={singleRace.speedBreakersCount}
@@ -191,7 +198,10 @@ export default function App() {
             gapMeters={singleRace.aiStandings.gapMeters}
             theme={theme}
             onToggleTheme={toggleTheme}
-            onOpenSettings={() => setIsSettingsOpen(true)}
+            onOpenSettings={() => {
+              singleRace.setIsPaused(true);
+              setIsSettingsOpen(true);
+            }}
             onRestart={singleRace.startRace}
             onExit={handleExitToMainMenu}
             players={[singleRace.player, ...singleRace.aiOpponents]}
@@ -311,12 +321,19 @@ export default function App() {
       {/* Global Settings & Keybindings Modal */}
       <SettingsModal
         isOpen={isSettingsOpen}
-        onClose={() => setIsSettingsOpen(false)}
+        onClose={() => {
+          setIsSettingsOpen(false);
+          if (gameMode === "single") {
+            singleRace.setIsPaused(false);
+          }
+        }}
         onRestart={singleRace.startRace}
         onExit={handleExitToMainMenu}
         theme={theme}
         onToggleTheme={toggleTheme}
         isMultiplayer={gameMode === "multi"}
+        isPaused={singleRace.isPaused}
+        onTogglePause={singleRace.togglePause}
         speedBreakersCount={singleRace.speedBreakersCount}
         onSpeedBreakersChange={singleRace.setSpeedBreakersCount}
         trafficCount={singleRace.trafficCount}

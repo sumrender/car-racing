@@ -1,18 +1,56 @@
 import * as THREE from "three";
 
-export interface CarCollisionEntity {
+/**
+ * Resolved impact information passed to polymorphic collidable entities.
+ */
+export interface CollisionImpact {
+  x: number;
+  z: number;
+  rotationY: number;
+  speed: number;
+  displacementX: number;
+  displacementZ: number;
+  normalImpulse: number;
+  tangentImpulse: number;
+}
+
+/**
+ * Unified polymorphic interface for any collidable body in the race
+ * (Local player, AI, Traffic, Obstacle, Remote network cars, etc.).
+ * Satisfies Open-Closed Principle (OCP) and Liskov Substitution Principle (LSP).
+ */
+export interface ICollidableEntity {
   id: string;
   x: number;
   z: number;
   rotationY: number;
   speed: number;
-  isLocalPlayer?: boolean;
-  isAI?: boolean;
-  isRemote?: boolean;
-  isTraffic?: boolean;
-  trafficIndex?: number;
-  aiIndex?: number;
+
+  /**
+   * Whether this entity is static/authoritative (e.g. remote network players whose position is server-driven).
+   * Static entities impart impulse and separation to dynamic bodies without having their own state modified.
+   */
+  isStatic?: boolean;
+
+  /**
+   * Whether this entity represents local player perspective for triggering feedback (audio/particles).
+   */
+  isLocal?: boolean;
+
+  /**
+   * Optional custom radius (defaults to 1.45m).
+   */
+  colliderRadius?: number;
+
+  /**
+   * Polymorphic callback invoked when physical separation and impulse are resolved.
+   * Eliminates the need for type discriminant flags and large if/else-if or switch dispatch blocks.
+   */
+  onCollisionResolved?(impact: CollisionImpact): void;
 }
+
+/** Backward compatibility alias */
+export type CarCollisionEntity = ICollidableEntity;
 
 export interface CollisionResult {
   involvesLocalPlayer: boolean;
@@ -22,31 +60,47 @@ export interface CollisionResult {
 }
 
 // Multi-sphere longitudinal layout along car chassis length
-const CAR_COLLIDER_OFFSETS = [-1.5, 0.0, 1.5]; // Rear, center, front
-const CAR_COLLIDER_RADIUS = 1.45; // 2.9m effective physical width/diameter
-const MIN_COLLISION_DISTANCE = CAR_COLLIDER_RADIUS * 2; // 2.9m
+const DEFAULT_CAR_COLLIDER_OFFSETS = [-1.5, 0.0, 1.5]; // Rear, center, front
+const DEFAULT_CAR_COLLIDER_RADIUS = 1.45; // 2.9m effective physical width/diameter
 
 /**
- * Resolves physical collisions between cars (Local Player, AI Opponents, and Remote Players).
+ * Resolves physical collisions between any collidable entities (Local Player, AI Opponents, Traffic, Remote Players, Dynamic Obstacles).
  * Applies realistic mass-conserving impulse momentum exchange, elastic body separation,
- * and tangential surface slide friction. Cars never snap or auto-align.
+ * and tangential surface slide friction. Operates purely through polymorphic spatial callbacks.
  */
 export function resolveCarCollisions(
-  cars: CarCollisionEntity[],
+  entities: ICollidableEntity[],
   onCollision?: (res: CollisionResult) => void
 ): void {
-  if (cars.length < 2) return;
+  if (entities.length < 2) return;
 
   const iterations = 2; // Iterative relaxation for clean multi-car cluster resolution
 
-  for (let iter = 0; iter < iterations; iter++) {
-    for (let i = 0; i < cars.length; i++) {
-      for (let j = i + 1; j < cars.length; j++) {
-        const carA = cars[i];
-        const carB = cars[j];
+  // Track initial positions to compute total displacement for polymorphic callbacks
+  const initialPositions = new Map<string, { x: number; z: number; speed: number; rotationY: number }>();
+  for (const ent of entities) {
+    initialPositions.set(ent.id, {
+      x: ent.x,
+      z: ent.z,
+      speed: ent.speed,
+      rotationY: ent.rotationY,
+    });
+  }
 
-        // Skip two remote cars colliding with each other (their positions are network-authoritative)
-        if (carA.isRemote && carB.isRemote) continue;
+  const impulseMap = new Map<string, { normalImpulse: number; tangentImpulse: number }>();
+
+  for (let iter = 0; iter < iterations; iter++) {
+    for (let i = 0; i < entities.length; i++) {
+      for (let j = i + 1; j < entities.length; j++) {
+        const carA = entities[i];
+        const carB = entities[j];
+
+        // Skip two static/remote cars colliding with each other (their positions are network-authoritative)
+        if (carA.isStatic && carB.isStatic) continue;
+
+        const radiusA = carA.colliderRadius ?? DEFAULT_CAR_COLLIDER_RADIUS;
+        const radiusB = carB.colliderRadius ?? DEFAULT_CAR_COLLIDER_RADIUS;
+        const minDistance = radiusA + radiusB;
 
         let maxOverlap = 0;
         let collisionNx = 0;
@@ -60,14 +114,14 @@ export function resolveCarCollisions(
         const sinB = Math.sin(carB.rotationY);
         const cosB = Math.cos(carB.rotationY);
 
-        // Check all 3 bounding circles on Car A against all 3 bounding circles on Car B
+        // Check 3 bounding spheres on Car A against 3 bounding spheres on Car B
         for (let a = 0; a < 3; a++) {
-          const offA = CAR_COLLIDER_OFFSETS[a];
+          const offA = DEFAULT_CAR_COLLIDER_OFFSETS[a];
           const ax = carA.x + sinA * offA;
           const az = carA.z + cosA * offA;
 
           for (let b = 0; b < 3; b++) {
-            const offB = CAR_COLLIDER_OFFSETS[b];
+            const offB = DEFAULT_CAR_COLLIDER_OFFSETS[b];
             const bx = carB.x + sinB * offB;
             const bz = carB.z + cosB * offB;
 
@@ -75,16 +129,16 @@ export function resolveCarCollisions(
             const dz = az - bz;
             const distSq = dx * dx + dz * dz;
 
-            if (distSq < MIN_COLLISION_DISTANCE * MIN_COLLISION_DISTANCE) {
+            if (distSq < minDistance * minDistance) {
               const dist = Math.max(Math.sqrt(distSq), 0.001);
-              const overlap = MIN_COLLISION_DISTANCE - dist;
+              const overlap = minDistance - dist;
 
               if (overlap > maxOverlap) {
                 maxOverlap = overlap;
                 collisionNx = dx / dist; // Points from B toward A
                 collisionNz = dz / dist;
-                contactX = bx + collisionNx * (CAR_COLLIDER_RADIUS + overlap * 0.5);
-                contactZ = bz + collisionNz * (CAR_COLLIDER_RADIUS + overlap * 0.5);
+                contactX = bx + collisionNx * (radiusB + overlap * 0.5);
+                contactZ = bz + collisionNz * (radiusB + overlap * 0.5);
                 hasCollision = true;
               }
             }
@@ -92,8 +146,8 @@ export function resolveCarCollisions(
         }
 
         if (hasCollision && maxOverlap > 0.002) {
-          const isAStatic = !!carA.isRemote;
-          const isBStatic = !!carB.isRemote;
+          const isAStatic = !!carA.isStatic;
+          const isBStatic = !!carB.isStatic;
 
           // 1. PHYSICAL POSITIONAL SEPARATION (Smooth mass-weighted de-penetration)
           const separationFactor = 0.55;
@@ -135,11 +189,14 @@ export function resolveCarCollisions(
               const frictionCoeff = 0.25;
               const frictionImpulse = -relVelTangent * frictionCoeff * 0.3;
 
+              impulseMap.set(carA.id, { normalImpulse, tangentImpulse: frictionImpulse });
+              impulseMap.set(carB.id, { normalImpulse: -normalImpulse, tangentImpulse: -frictionImpulse });
+
               if (!isAStatic) {
                 // Apply normal & tangential impulses to Car A
                 const nextVAx = vAx + collisionNx * normalImpulse + tangentX * frictionImpulse;
                 const nextVAz = vAz + collisionNz * normalImpulse + tangentZ * frictionImpulse;
-                
+
                 // Project resulting velocity along car heading (preserving forward drive)
                 const forwardSpeedA = nextVAx * sinA + nextVAz * cosA;
                 carA.speed = Math.max(forwardSpeedA, carA.speed * 0.75);
@@ -155,7 +212,7 @@ export function resolveCarCollisions(
                 // Apply normal & tangential impulses to Car B
                 const nextVBx = vBx - collisionNx * normalImpulse - tangentX * frictionImpulse;
                 const nextVBz = vBz - collisionNz * normalImpulse - tangentZ * frictionImpulse;
-                
+
                 // Project resulting velocity along car heading
                 const forwardSpeedB = nextVBx * sinB + nextVBz * cosB;
                 carB.speed = Math.max(forwardSpeedB, carB.speed * 0.75);
@@ -170,7 +227,7 @@ export function resolveCarCollisions(
               // Visual sparks & sound emission
               if (onCollision) {
                 const intensity = Math.abs(relVelNormal);
-                const involvesLocalPlayer = !!(carA.isLocalPlayer || carB.isLocalPlayer);
+                const involvesLocalPlayer = !!(carA.isLocal || carB.isLocal);
                 onCollision({
                   involvesLocalPlayer,
                   intensity,
@@ -182,6 +239,24 @@ export function resolveCarCollisions(
           }
         }
       }
+    }
+  }
+
+  // 3. POLYMORPHIC DISPATCH: Notify each entity of its updated position and impulse
+  for (const ent of entities) {
+    if (ent.onCollisionResolved) {
+      const init = initialPositions.get(ent.id);
+      const impulse = impulseMap.get(ent.id) ?? { normalImpulse: 0, tangentImpulse: 0 };
+      ent.onCollisionResolved({
+        x: ent.x,
+        z: ent.z,
+        rotationY: ent.rotationY,
+        speed: ent.speed,
+        displacementX: init ? ent.x - init.x : 0,
+        displacementZ: init ? ent.z - init.z : 0,
+        normalImpulse: impulse.normalImpulse,
+        tangentImpulse: impulse.tangentImpulse,
+      });
     }
   }
 }

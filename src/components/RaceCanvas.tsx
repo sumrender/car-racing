@@ -2,7 +2,7 @@ import { useEffect, useRef } from "react";
 import * as THREE from "three";
 import { Player, TrafficVehicle } from "../types";
 import { ISoundManager, getSoundManager } from "../utils/soundManager";
-import { resolveCarCollisions, CarCollisionEntity } from "../utils/carCollision";
+import { resolveCarCollisions, ICollidableEntity } from "../utils/carCollision";
 import {
   generateSpeedBreakers,
   buildSpeedBreakerMesh,
@@ -48,6 +48,7 @@ interface RaceCanvasProps {
   speedBreakersCount?: number;
   trafficCount?: number;
   soundManager?: ISoundManager;
+  isPaused?: boolean;
   onAIOpponentUpdate?: (ai: Player, standings: StandingsResult) => void;
   onAIPackUpdate?: (aiPack: Player[], standings: StandingsResult) => void;
   onTrafficUpdate?: (vehicles: TrafficVehicle[]) => void;
@@ -65,6 +66,7 @@ export default function RaceCanvas({
   speedBreakersCount = 4,
   trafficCount = 8,
   soundManager,
+  isPaused = false,
   onAIOpponentUpdate,
   onAIPackUpdate,
   onTrafficUpdate,
@@ -94,6 +96,17 @@ export default function RaceCanvas({
   const speedBreakersRef = useRef<SpeedBreaker[]>([]);
   const trafficCountRef = useRef<number>(trafficCount);
   const trafficVehiclesRef = useRef<TrafficVehicle[]>([]);
+  const isPausedRef = useRef<boolean>(isPaused);
+
+  useEffect(() => {
+    isPausedRef.current = isPaused;
+    if (isPaused) {
+      soundRef.current.stopNitro();
+      soundRef.current.updateEngine(0, false, false, false, "paused", true, 0.1);
+      soundRef.current.updateDrift(false, 0, 0.1);
+      soundRef.current.updateWindRush(0, false, true);
+    }
+  }, [isPaused]);
 
   const {
     carStateRef,
@@ -371,10 +384,18 @@ export default function RaceCanvas({
 
     let lastTime = performance.now();
     let networkSendTimer = 0;
+    let animId = 0;
 
     const gameLoop = (currentTime: number) => {
       const dt = Math.min((currentTime - lastTime) / 1000, 0.1);
       lastTime = currentTime;
+
+      // If game is paused, render the current frame as static view and skip physics/simulations
+      if (isPausedRef.current) {
+        renderer.render(scene, camera);
+        animId = requestAnimationFrame(gameLoop);
+        return;
+      }
 
       const pState = carStateRef.current;
       const keys = keysRef.current;
@@ -560,13 +581,33 @@ export default function RaceCanvas({
         spawnDust,
       });
 
-      // 3. MULTI-CAR PHYSICAL COLLISION RESOLUTION
+      // Update realtime vehicle audio loops (combustion engine RPM & high-speed wind rush)
+      const isAccelerating = keys.w;
+      const isBraking = keys.s;
+      const isNitro = keys.space || pState.boostTimer > 0;
+      soundRef.current.updateEngine(
+        pState.speed,
+        isAccelerating,
+        isBraking,
+        isNitro,
+        activeRoomStatusRef.current,
+        isPausedRef.current,
+        dt
+      );
+      soundRef.current.updateWindRush(
+        pState.speed,
+        isNitro,
+        isPausedRef.current
+      );
+
+      // 3. MULTI-CAR PHYSICAL COLLISION RESOLUTION (Polymorphic Strategy Pattern)
       if (
         activeRoomStatusRef.current === "racing" ||
         activeRoomStatusRef.current === "countdown"
       ) {
-        const carEntities: CarCollisionEntity[] = [];
+        const carEntities: ICollidableEntity[] = [];
 
+        // 3.1 Local Player Collidable
         if (!pState.finished) {
           carEntities.push({
             id: "local_player",
@@ -574,10 +615,17 @@ export default function RaceCanvas({
             z: pState.z,
             rotationY: pState.rotationY - pState.driftAngle,
             speed: pState.speed,
-            isLocalPlayer: true,
+            isLocal: true,
+            onCollisionResolved: (impact) => {
+              pState.x = impact.x;
+              pState.z = impact.z;
+              pState.rotationY = impact.rotationY + pState.driftAngle;
+              pState.speed = impact.speed;
+            },
           });
         }
 
+        // 3.2 AI Opponent Pack Collidables
         if (isSinglePlayer && aiPackStateRef.current.length > 0) {
           aiPackStateRef.current.forEach((aiState, idx) => {
             if (!aiState.player.finished) {
@@ -587,13 +635,41 @@ export default function RaceCanvas({
                 z: aiState.player.z,
                 rotationY: aiState.player.rotationY,
                 speed: aiState.player.speed,
-                isAI: true,
-                aiIndex: idx,
+                onCollisionResolved: (impact) => {
+                  aiState.player.x = impact.x;
+                  aiState.player.z = impact.z;
+                  aiState.player.rotationY = impact.rotationY;
+                  aiState.player.speed = impact.speed;
+                  aiState.currentSpeed = impact.speed;
+
+                  const roadCheckAI = checkOnRoad(new THREE.Vector3(impact.x, 0, impact.z));
+                  const tangentAI = TRACK_CURVE.getTangentAt(roadCheckAI.u).normalize();
+                  const normalAI = new THREE.Vector3(-tangentAI.z, 0, tangentAI.x);
+                  const diffAI = new THREE.Vector3(
+                    impact.x - roadCheckAI.closestPt.x,
+                    0,
+                    impact.z - roadCheckAI.closestPt.z
+                  );
+                  const signedOffset = diffAI.dot(normalAI);
+                  aiState.lateralOffset = THREE.MathUtils.clamp(signedOffset, -4.2, 4.2);
+                  aiState.targetLateralOffset = aiState.lateralOffset;
+
+                  const aiMesh = aiCarMeshes[idx];
+                  if (aiMesh) {
+                    const currentY =
+                      aiJumpStatesRef.current[idx]?.y || aiState.player.y || 0;
+                    const currentPitch = aiJumpStatesRef.current[idx]?.pitch || 0;
+                    aiMesh.position.set(impact.x, currentY, impact.z);
+                    aiMesh.rotation.y = impact.rotationY;
+                    aiMesh.rotation.x = currentPitch;
+                  }
+                },
               });
             }
           });
         }
 
+        // 3.3 Remote Network Players (Server-authoritative static colliders)
         if (!isSinglePlayer && remotePlayersRef.current.length > 0) {
           remotePlayersRef.current.forEach((rp) => {
             if (!rp.finished) {
@@ -603,12 +679,13 @@ export default function RaceCanvas({
                 z: rp.z,
                 rotationY: rp.rotationY,
                 speed: rp.speed,
-                isRemote: true,
+                isStatic: true,
               });
             }
           });
         }
 
+        // 3.4 Highway Traffic Vehicles Collidables
         if (isSinglePlayer && trafficVehiclesRef.current.length > 0) {
           trafficVehiclesRef.current.forEach((tv, idx) => {
             carEntities.push({
@@ -617,12 +694,35 @@ export default function RaceCanvas({
               z: tv.z,
               rotationY: tv.rotationY,
               speed: tv.speed,
-              isTraffic: true,
-              trafficIndex: idx,
+              onCollisionResolved: (impact) => {
+                tv.x = impact.x;
+                tv.z = impact.z;
+                tv.rotationY = impact.rotationY;
+                tv.speed = impact.speed;
+
+                const roadCheckTV = checkOnRoad(new THREE.Vector3(impact.x, 0, impact.z));
+                const tangentTV = TRACK_CURVE.getTangentAt(roadCheckTV.u).normalize();
+                const normalTV = new THREE.Vector3(-tangentTV.z, 0, tangentTV.x);
+                const diffTV = new THREE.Vector3(
+                  impact.x - roadCheckTV.closestPt.x,
+                  0,
+                  impact.z - roadCheckTV.closestPt.z
+                );
+                const signedOffset = diffTV.dot(normalTV);
+                tv.lateralOffset = THREE.MathUtils.clamp(signedOffset, -9.0, 9.0);
+                tv.targetLateralOffset = tv.lateralOffset;
+
+                const tMesh = trafficMeshes[idx];
+                if (tMesh) {
+                  tMesh.position.set(impact.x, 0, impact.z);
+                  tMesh.rotation.y = impact.rotationY;
+                }
+              },
             });
           });
         }
 
+        // Execute unified collision solver & polymorphic dispatch
         resolveCarCollisions(carEntities, (event) => {
           if (event.involvesLocalPlayer) {
             soundRef.current.playCollision(Math.min(event.intensity / 18, 1.0));
@@ -646,72 +746,6 @@ export default function RaceCanvas({
             );
           }
         });
-
-        for (const ent of carEntities) {
-          if (ent.isLocalPlayer) {
-            pState.x = ent.x;
-            pState.z = ent.z;
-            pState.rotationY = ent.rotationY + pState.driftAngle;
-            pState.speed = ent.speed;
-          } else if (ent.isAI && ent.aiIndex !== undefined) {
-            const aiState = aiPackStateRef.current[ent.aiIndex];
-            if (aiState) {
-              aiState.player.x = ent.x;
-              aiState.player.z = ent.z;
-              aiState.player.rotationY = ent.rotationY;
-              aiState.player.speed = ent.speed;
-              aiState.currentSpeed = ent.speed;
-
-              const roadCheckAI = checkOnRoad(new THREE.Vector3(ent.x, 0, ent.z));
-              const tangentAI = TRACK_CURVE.getTangentAt(roadCheckAI.u).normalize();
-              const normalAI = new THREE.Vector3(-tangentAI.z, 0, tangentAI.x);
-              const diffAI = new THREE.Vector3(
-                ent.x - roadCheckAI.closestPt.x,
-                0,
-                ent.z - roadCheckAI.closestPt.z
-              );
-              const signedOffset = diffAI.dot(normalAI);
-              aiState.lateralOffset = THREE.MathUtils.clamp(signedOffset, -4.2, 4.2);
-              aiState.targetLateralOffset = aiState.lateralOffset;
-
-              const aiMesh = aiCarMeshes[ent.aiIndex];
-              if (aiMesh) {
-                const currentY =
-                  aiJumpStatesRef.current[ent.aiIndex]?.y || aiState.player.y || 0;
-                const currentPitch = aiJumpStatesRef.current[ent.aiIndex]?.pitch || 0;
-                aiMesh.position.set(ent.x, currentY, ent.z);
-                aiMesh.rotation.y = ent.rotationY;
-                aiMesh.rotation.x = currentPitch;
-              }
-            }
-          } else if (ent.isTraffic && ent.trafficIndex !== undefined) {
-            const tv = trafficVehiclesRef.current[ent.trafficIndex];
-            if (tv) {
-              tv.x = ent.x;
-              tv.z = ent.z;
-              tv.rotationY = ent.rotationY;
-              tv.speed = ent.speed;
-
-              const roadCheckTV = checkOnRoad(new THREE.Vector3(ent.x, 0, ent.z));
-              const tangentTV = TRACK_CURVE.getTangentAt(roadCheckTV.u).normalize();
-              const normalTV = new THREE.Vector3(-tangentTV.z, 0, tangentTV.x);
-              const diffTV = new THREE.Vector3(
-                ent.x - roadCheckTV.closestPt.x,
-                0,
-                ent.z - roadCheckTV.closestPt.z
-              );
-              const signedOffset = diffTV.dot(normalTV);
-              tv.lateralOffset = THREE.MathUtils.clamp(signedOffset, -9.0, 9.0);
-              tv.targetLateralOffset = tv.lateralOffset;
-
-              const tMesh = trafficMeshes[ent.trafficIndex];
-              if (tMesh) {
-                tMesh.position.set(ent.x, 0, ent.z);
-                tMesh.rotation.y = ent.rotationY;
-              }
-            }
-          }
-        }
       }
 
       // Synchronize player orientation
@@ -907,10 +941,10 @@ export default function RaceCanvas({
         }
       }
 
-      requestAnimationFrame(gameLoop);
+      animId = requestAnimationFrame(gameLoop);
     };
 
-    const animId = requestAnimationFrame(gameLoop);
+    animId = requestAnimationFrame(gameLoop);
 
     return () => {
       cancelAnimationFrame(animId);
@@ -924,6 +958,10 @@ export default function RaceCanvas({
       warpMat.dispose();
 
       speedBreakerMeshes.forEach((mesh) => scene.remove(mesh));
+      soundRef.current.stopNitro();
+      soundRef.current.updateEngine(0, false, false, false, "idle", true, 0.1);
+      soundRef.current.updateDrift(false, 0, 0.1);
+      soundRef.current.updateWindRush(0, false, true);
     };
   }, [localPlayer.color, localPlayer.id, theme, trafficCount]);
 

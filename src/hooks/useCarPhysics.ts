@@ -204,6 +204,9 @@ export function useCarPhysics(options: UseCarPhysicsOptions = {}) {
 
         pState.speed = Math.max(pState.speed * 0.96, 18);
 
+        // Play wall / guard rail scrape and impact sound
+        soundRef.current.playWallScrape(pState.speed, Math.min(Math.abs(pState.speed) / 45, 1.0));
+
         if (pState.isDrifting) {
           pState.isDrifting = false;
           pState.driftScore = 0;
@@ -326,6 +329,7 @@ export function useCarPhysics(options: UseCarPhysicsOptions = {}) {
         if (!pState.isDrifting) {
           pState.isDrifting = true;
         }
+        soundRef.current.updateDrift(true, pState.speed, dt);
 
         const driftRate = 0.8;
         const targetDriftAngle = keys.a ? 0.38 : -0.38;
@@ -354,6 +358,7 @@ export function useCarPhysics(options: UseCarPhysicsOptions = {}) {
           );
         }
       } else {
+        soundRef.current.updateDrift(false, 0, dt);
         if (pState.isDrifting) {
           pState.isDrifting = false;
 

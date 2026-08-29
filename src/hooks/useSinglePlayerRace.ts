@@ -20,6 +20,7 @@ export function useSinglePlayerRace({
   userColor,
 }: UseSinglePlayerRaceOptions) {
   const [status, setStatus] = useState<SinglePlayerStatus>("setup");
+  const [isPaused, setIsPaused] = useState<boolean>(false);
   const [countdown, setCountdown] = useState(3);
   const [bestTime, setBestTime] = useState<number | null>(() => {
     const saved = localStorage.getItem("racer_solo_best");
@@ -30,6 +31,8 @@ export function useSinglePlayerRace({
     raceTimeMs,
     startTimer,
     stopTimer,
+    pauseTimer,
+    resumeTimer,
     resetTimer,
   } = useRaceTimer();
 
@@ -142,8 +145,30 @@ export function useSinglePlayerRace({
     localStorage.setItem("racer_ai_count", clamped.toString());
   }, []);
 
+  const togglePause = useCallback(() => {
+    setIsPaused((prev) => {
+      const next = !prev;
+      if (next) {
+        pauseTimer();
+      } else {
+        resumeTimer();
+      }
+      return next;
+    });
+  }, [pauseTimer, resumeTimer]);
+
+  const setPausedExplicit = useCallback((paused: boolean) => {
+    setIsPaused(paused);
+    if (paused) {
+      pauseTimer();
+    } else {
+      resumeTimer();
+    }
+  }, [pauseTimer, resumeTimer]);
+
   const startRace = useCallback(() => {
     warmUpAudioEngine();
+    setIsPaused(false);
     localStorage.setItem("racer_name", userName.trim() || "Solo Driver");
     localStorage.setItem("racer_color", userColor);
     localStorage.setItem("racer_ai_count", aiOpponentsCount.toString());
@@ -175,24 +200,11 @@ export function useSinglePlayerRace({
       place: 1,
     });
 
-    const initialPack = createAIPackState(aiOpponentsCount, aiDifficulty);
-    setAiOpponents(initialPack.map((s) => s.player));
+    const initialAIPack = createAIPackState(aiOpponentsCount, aiDifficulty);
+    setAiOpponents(initialAIPack.map((s) => s.player));
 
-    setAiStandings({
-      playerPlace: 1,
-      aiPlace: 2,
-      totalRacers: aiOpponentsCount + 1,
-      gapMeters: 0,
-      leadPlayerName: userName.trim() || "Solo Driver",
-      isLapping: false,
-      lapsDifference: 0,
-      playerProgress: 0,
-      aiProgress: 0,
-      allStandings: [],
-    });
-
-    setStatus("countdown");
     setCountdown(3);
+    setStatus("countdown");
     resetTimer();
 
     let count = 3;
@@ -260,6 +272,7 @@ export function useSinglePlayerRace({
       clearInterval(countdownTimerRef.current);
       countdownTimerRef.current = null;
     }
+    setIsPaused(false);
     stopTimer();
     setStatus("setup");
   }, [stopTimer]);
@@ -267,6 +280,9 @@ export function useSinglePlayerRace({
   return {
     status,
     setStatus,
+    isPaused,
+    setIsPaused: setPausedExplicit,
+    togglePause,
     countdown,
     bestTime,
     raceTimeMs,
